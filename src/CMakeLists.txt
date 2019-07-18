@@ -325,6 +325,8 @@ if (ARCHITECTURE_x86_64)
     else()
         target_sources(dynarmic PRIVATE backend/x64/exception_handler_generic.cpp)
     endif()
+
+    target_link_libraries(dynarmic PRIVATE xbyak)
 elseif(ARCHITECTURE_Aarch64)
     target_sources(dynarmic PRIVATE
          backend/A64/emitter/a64_emitter.cpp
@@ -350,9 +352,11 @@ target_link_libraries(dynarmic
         fmt::fmt
         mp
         tsl::robin_map
-        xbyak
         $<$<BOOL:DYNARMIC_USE_LLVM>:${llvm_libs}>
 )
+if (ARCHITECTURE_x86_64)
+    target_link_libraries(dynarmic PRIVATE xbyak)
+endif()
 if (DYNARMIC_ENABLE_CPU_FEATURE_DETECTION)
     target_compile_definitions(dynarmic PRIVATE DYNARMIC_ENABLE_CPU_FEATURE_DETECTION=1)
 endif()
