@@ -64,3 +64,8 @@ matrix:
             - ninja-build
       install: ./.travis/sse3-only-on-x86_64-linux/deps.sh
       script: ./.travis/sse3-only-on-x86_64-linux/build.sh
+    - env: NAME="AArch64 build"
+      os: linux
+      dist: bionic
+      services: docker
+      script: ./.travis/emulate-aarch64/emulate-aarch64.sh
