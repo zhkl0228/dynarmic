@@ -171,13 +171,13 @@ struct UserConfig {
     void** page_table = nullptr;
     /// Declares how many valid address bits are there in virtual addresses.
     /// Determines the size of page_table. Valid values are between 12 and 64 inclusive.
-    /// This is only used if page_table is not nullptr.
+    /// This is only used if page_table or fastmem_pointer is not nullptr.
     size_t page_table_address_space_bits = 36;
     /// Determines what happens if the guest accesses an entry that is off the end of the
     /// page table. If true, Dynarmic will silently mirror page_table's address space. If
     /// false, accessing memory outside of page_table bounds will result in a call to the
     /// relevant memory callback.
-    /// This is only used if page_table is not nullptr.
+    /// This is only used if page_table or fastmem_pointer is not nullptr.
     bool silently_mirror_page_table = true;
     /// Determines if the pointer in the page_table shall be offseted locally or globally.
     /// 'false' will access page_table[addr >> bits][addr & mask]
@@ -195,6 +195,15 @@ struct UserConfig {
     /// Determines if the above option only triggers when the misalignment straddles a
     /// page boundary.
     bool only_detect_misalignment_via_page_table_on_page_boundary = false;
+
+    // Fastmem Pointer
+    // This should point to the beginning of a 4GB address space which is in arranged just like
+    // what you wish for emulated memory to be. If the host page faults on an address, the JIT
+    // will fallback to calling the MemoryRead*/MemoryWrite* callbacks.
+    void* fastmem_pointer = nullptr;
+    /// Determines if instructions that pagefault should cause recompilation of that block
+    /// with fastmem disabled.
+    bool recompile_on_fastmem_failure = true;
 
     /// This option relates to translation. Generally when we run into an unpredictable
     /// instruction the ExceptionRaised callback is called. If this is true, we define
