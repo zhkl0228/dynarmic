@@ -342,15 +342,17 @@ void EmitThreeOpVectorOperation(BlockOfCode& code, EmitContext& ctx, IR::Inst* i
         const Xbyak::Xmm xmm_a = ctx.reg_alloc.UseScratchXmm(args[0]);
         const Xbyak::Xmm xmm_b = ctx.reg_alloc.UseXmm(args[1]);
 
-        MaybeStandardFPSCRValue(code, ctx, fpcr_controlled, [&]{
-            if constexpr (std::is_member_function_pointer_v<Function>) {
+        if constexpr (std::is_member_function_pointer_v<Function>) {
+            MaybeStandardFPSCRValue(code, ctx, fpcr_controlled, [&]{
                 (code.*fn)(xmm_a, xmm_b);
-            } else {
+            });
+        } else {
+            MaybeStandardFPSCRValue(code, ctx, fpcr_controlled, [&]{
                 fn(xmm_a, xmm_b);
-            }
+            });
+        }
 
-            ForceToDefaultNaN<fsize>(code, ctx, xmm_a);
-        });
+        ForceToDefaultNaN<fsize>(code, ctx, xmm_a);
 
         ctx.reg_alloc.DefineValue(inst, xmm_a);
         return;
