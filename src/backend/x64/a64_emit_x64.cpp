@@ -75,7 +75,7 @@ A64EmitX64::BlockDescriptor A64EmitX64::Emit(IR::Block& block) {
     code.EnableWriting();
     SCOPE_EXIT { code.DisableWriting(); };
 
-    static const std::vector<HostLoc> gpr_order = [this]{
+    const std::vector<HostLoc> gpr_order = [this]{
         std::vector<HostLoc> gprs{any_gpr};
         if (conf.page_table) {
             gprs.erase(std::find(gprs.begin(), gprs.end(), HostLoc::R14));
@@ -930,7 +930,7 @@ template<std::size_t bitsize, auto callback>
 void A64EmitX64::EmitMemoryRead(A64EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (!conf.page_table) {
+    if (!conf.page_table && !conf.fastmem_pointer) {
         ctx.reg_alloc.HostCall(inst, {}, args[0]);
         Devirtualize<callback>(conf.callbacks).EmitCall(code);
         return;
@@ -976,7 +976,7 @@ template<std::size_t bitsize, auto callback>
 void A64EmitX64::EmitMemoryWrite(A64EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (!conf.page_table) {
+    if (!conf.page_table && !conf.fastmem_pointer) {
         ctx.reg_alloc.HostCall(nullptr, {}, args[0], args[1]);
         Devirtualize<callback>(conf.callbacks).EmitCall(code);
         return;

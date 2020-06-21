@@ -93,7 +93,7 @@ A32EmitX64::BlockDescriptor A32EmitX64::Emit(IR::Block& block) {
     code.EnableWriting();
     SCOPE_EXIT { code.DisableWriting(); };
 
-    static const std::vector<HostLoc> gpr_order = [this]{
+    const std::vector<HostLoc> gpr_order = [this]{
         std::vector<HostLoc> gprs{any_gpr};
         if (conf.page_table) {
             gprs.erase(std::find(gprs.begin(), gprs.end(), HostLoc::R14));
@@ -990,7 +990,7 @@ template<std::size_t bitsize, auto callback>
 void A32EmitX64::ReadMemory(A32EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (!conf.page_table) {
+    if (!conf.page_table && !conf.fastmem_pointer) {
         ctx.reg_alloc.HostCall(inst, {}, args[0]);
         Devirtualize<callback>(conf.callbacks).EmitCall(code);
         return;
@@ -1015,8 +1015,6 @@ void A32EmitX64::ReadMemory(A32EmitContext& ctx, IR::Inst* inst) {
                 *marker,
             }
         );
-
-        ctx.reg_alloc.DefineValue(inst, value);
     } else {
         Xbyak::Label abort, end;
 
@@ -1038,7 +1036,7 @@ template<std::size_t bitsize, auto callback>
 void A32EmitX64::WriteMemory(A32EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (!conf.page_table) {
+    if (!conf.page_table && !conf.fastmem_pointer) {
         ctx.reg_alloc.HostCall(nullptr, {}, args[0], args[1]);
         Devirtualize<callback>(conf.callbacks).EmitCall(code);
         return;

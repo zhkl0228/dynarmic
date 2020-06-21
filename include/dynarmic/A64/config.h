@@ -196,10 +196,11 @@ struct UserConfig {
     /// page boundary.
     bool only_detect_misalignment_via_page_table_on_page_boundary = false;
 
-    // Fastmem Pointer
-    // This should point to the beginning of a 4GB address space which is in arranged just like
-    // what you wish for emulated memory to be. If the host page faults on an address, the JIT
-    // will fallback to calling the MemoryRead*/MemoryWrite* callbacks.
+    /// Fastmem Pointer
+    /// This should point to the beginning of a 2^page_table_address_space_bits bytes
+    /// address space which is in arranged just like what you wish for emulated memory to
+    /// be. If the host page faults on an address, the JIT will fallback to calling the
+    /// MemoryRead*/MemoryWrite* callbacks.
     void* fastmem_pointer = nullptr;
     /// Determines if instructions that pagefault should cause recompilation of that block
     /// with fastmem disabled.
