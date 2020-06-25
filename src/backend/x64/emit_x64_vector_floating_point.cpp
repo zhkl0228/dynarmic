@@ -950,6 +950,123 @@ void EmitX64::EmitFPVectorMin64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPVectorMinMax<64, false>(code, ctx, inst);
 }
 
+template<size_t fsize, bool is_max>
+static void EmitFPVectorMinMaxNumeric(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
+    using FPT = mp::unsigned_integer_of_size<fsize>;
+    constexpr u8 mantissa_msb_bit = static_cast<u8>(FP::FPInfo<FPT>::explicit_mantissa_width - 1);
+
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+    const bool fpcr_controlled = args[2].GetImmediateU1();
+    const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+    const Xbyak::Xmm xmm_a = ctx.FPCR(fpcr_controlled).FZ() ? ctx.reg_alloc.UseScratchXmm(args[0]) : ctx.reg_alloc.UseXmm(args[0]);
+    const Xbyak::Xmm xmm_b = ctx.FPCR(fpcr_controlled).FZ() ? ctx.reg_alloc.UseScratchXmm(args[1]) : ctx.reg_alloc.UseXmm(args[1]);
+
+    const Xbyak::Xmm eq = ctx.reg_alloc.ScratchXmm();
+    const Xbyak::Xmm tmp0 = ctx.reg_alloc.ScratchXmm();
+    const Xbyak::Xmm tmp1 = ctx.reg_alloc.ScratchXmm();
+
+    Xbyak::Label end, fallback;
+
+    MaybeStandardFPSCRValue(code, ctx, fpcr_controlled, [&]{
+        DenormalsAreZero<fsize>(code, ctx.FPCR(fpcr_controlled), {xmm_a, xmm_b}, xmm0);
+
+        if (!code.HasAVX()) {
+            FCODE(vcmpeqp)(xmm0, xmm_a, xmm_b);
+            FCODE(vcmpunordp)(tmp0, xmm_a, xmm_a);
+            FCODE(vcmpunordp)(tmp1, xmm_b, xmm_b);
+            code.pand(tmp0, xmm_a);
+            code.vpandn(tmp1, xmm_b, tmp1);
+            FCODE(orp)(tmp0, tmp1);
+            if constexpr (is_max) {
+                code.vpand(eq, xmm_a, xmm_b);
+                FCODE(vmaxp)(result, xmm_a, xmm_b);
+            } else {
+                code.vpor(eq, xmm_a, xmm_b);
+                FCODE(vminp)(result, xmm_a, xmm_b);
+            }
+            ICODE(psll)(tmp0, static_cast<u8>(fsize - mantissa_msb_bit));
+
+            // At this point:
+            // tmp0 = IsSNaN(xmm_a) || IsQNaN(xmm_b)
+            // xmm0 == (xmm_a == xmm_b)
+            // result = xmm_a {<,>} xmm_b ? xmm_a : xmm_b
+
+            FCODE(blendvp)(result, eq);
+            FCODE(vblendvp)(result, result, xmm_a, tmp0);
+        } else {
+            /*
+            code.movaps(tmp0, xmm_a);
+            code.movaps(tmp1, xmm_b);
+            FCODE(cmpunordp)(tmp0, tmp0);
+            FCODE(cmpunordp)(tmp1, tmp1);
+            */
+            FCODE(vcmpunordp)(tmp0, xmm_a, xmm_a);
+            FCODE(vcmpunordp)(tmp1, xmm_b, xmm_b);
+
+            code.pand(tmp0, xmm_a);
+
+            /*
+            code.movaps(xmm0, xmm_b);
+            code.pandn(xmm0, tmp1);
+            code.por(tmp0, xmm0);
+            */
+            code.vpandn(tmp1, xmm_b, tmp1);
+            FCODE(orp)(tmp0, tmp1);
+
+            ICODE(psll)(tmp0, static_cast<u8>(fsize - mantissa_msb_bit));
+            code.psrad(tmp0, 31);
+            if constexpr (fsize == 64) {
+                code.pshufd(tmp0, tmp0, 0b11110101);
+            }
+
+            /*
+            code.movaps(xmm0, xmm_a);
+            FCODE(cmpeqp)(xmm0, xmm_b);
+            */
+            FCODE(vcmpeqp)(xmm0, xmm_a, xmm_b);
+
+            code.movaps(eq, xmm_a);
+            code.movaps(result, xmm_a);
+            if constexpr (is_max) {
+                code.pand(eq, xmm_b);
+                FCODE(maxp)(result, xmm_b);
+            } else {
+                code.por(eq, xmm_b);
+                FCODE(minp)(result, xmm_b);
+            }
+
+            code.pand(eq, xmm0);
+            code.pandn(xmm0, result);
+            code.por(eq, xmm0);
+
+            code.movaps(result, xmm_a);
+            code.pand(result, tmp0);
+            code.pandn(tmp0, eq);
+            code.por(result, tmp0);
+        }
+
+        ForceToDefaultNaN<fsize>(code, ctx.FPCR(fpcr_controlled), result);
+    });
+
+    ctx.reg_alloc.DefineValue(inst, result);
+}
+
+void EmitX64::EmitFPVectorMaxNumeric32(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPVectorMinMaxNumeric<32, true>(code, ctx, inst);
+}
+
+void EmitX64::EmitFPVectorMaxNumeric64(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPVectorMinMaxNumeric<64, true>(code, ctx, inst);
+}
+
+void EmitX64::EmitFPVectorMinNumeric32(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPVectorMinMaxNumeric<32, false>(code, ctx, inst);
+}
+
+void EmitX64::EmitFPVectorMinNumeric64(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPVectorMinMaxNumeric<64, false>(code, ctx, inst);
+}
+
 void EmitX64::EmitFPVectorMul32(EmitContext& ctx, IR::Inst* inst) {
     EmitThreeOpVectorOperation<32, DefaultIndexer>(code, ctx, inst, &Xbyak::CodeGenerator::mulps);
 }

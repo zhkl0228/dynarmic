@@ -795,6 +795,18 @@ bool ArmTranslatorVisitor::asimd_VMIN_float(bool D, bool sz, size_t Vn, size_t V
     });
 }
 
+bool ArmTranslatorVisitor::v8_VMAXNM(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorMaxNumeric(32, reg_n, reg_m, false);
+    });
+}
+
+bool ArmTranslatorVisitor::v8_VMINNM(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorMinNumeric(32, reg_n, reg_m, false);
+    });
+}
+
 bool ArmTranslatorVisitor::asimd_VRECPS(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
         return ir.FPVectorRecipStepFused(32, reg_n, reg_m, false);
