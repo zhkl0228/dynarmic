@@ -1081,13 +1081,10 @@ void A32EmitA64::EmitA32WriteMemory64(A32EmitContext& ctx, IR::Inst* inst) {
 }
 
 template <typename T, void (A32::UserCallbacks::*fn)(A32::VAddr, T)>
-static void ExclusiveWrite(BlockOfCode& code, RegAlloc& reg_alloc, IR::Inst* inst, const A32::UserConfig& config, bool prepend_high_word) {
+static void ExclusiveWrite(BlockOfCode& code, RegAlloc& reg_alloc, IR::Inst* inst, const A32::UserConfig& config) {
     auto args = reg_alloc.GetArgumentInfo(inst);
-    if (prepend_high_word) {
-        reg_alloc.HostCall(nullptr, {}, args[0], args[1], args[2]);
-    } else {
-        reg_alloc.HostCall(nullptr, {}, args[0], args[1]);
-    }
+    reg_alloc.HostCall(nullptr, {}, args[0], args[1]);
+
     // Use unused HostCall registers
     ARM64Reg passed = W9;
     ARM64Reg tmp = W10;
@@ -1102,34 +1099,31 @@ static void ExclusiveWrite(BlockOfCode& code, RegAlloc& reg_alloc, IR::Inst* ins
     code.TSTI2R(tmp, A32JitState::RESERVATION_GRANULE_MASK, reg_alloc.ScratchGpr());
     end.push_back(code.B(CC_NEQ));
     code.STR(INDEX_UNSIGNED, WZR, X28, offsetof(A32JitState, exclusive_state));
-    if (prepend_high_word) {
-        code.LSL(code.ABI_PARAM4,code.ABI_PARAM4, 32);
-        code.ORR(code.ABI_PARAM3, code.ABI_PARAM3, code.ABI_PARAM4);
-    }
+
     Devirtualize<fn>(config.callbacks).EmitCall(code);
     code.MOVI2R(passed, 0);
 
-   for (FixupBranch e : end) {
-        code.SetJumpTarget(e);
-   }   
+    for (FixupBranch e : end) {
+         code.SetJumpTarget(e);
+    }
 
     reg_alloc.DefineValue(inst, passed);
 }
 
 void A32EmitA64::EmitA32ExclusiveWriteMemory8(A32EmitContext& ctx, IR::Inst* inst) {
-    ExclusiveWrite<u8, &A32::UserCallbacks::MemoryWrite8>(code, ctx.reg_alloc, inst, config, false);
+    ExclusiveWrite<u8, &A32::UserCallbacks::MemoryWrite8>(code, ctx.reg_alloc, inst, config);
 }
 
 void A32EmitA64::EmitA32ExclusiveWriteMemory16(A32EmitContext& ctx, IR::Inst* inst) {
-    ExclusiveWrite<u16, &A32::UserCallbacks::MemoryWrite16>(code, ctx.reg_alloc, inst, config, false);
+    ExclusiveWrite<u16, &A32::UserCallbacks::MemoryWrite16>(code, ctx.reg_alloc, inst, config);
 }
 
 void A32EmitA64::EmitA32ExclusiveWriteMemory32(A32EmitContext& ctx, IR::Inst* inst) {
-    ExclusiveWrite<u32, &A32::UserCallbacks::MemoryWrite32>(code, ctx.reg_alloc, inst, config, false);
+    ExclusiveWrite<u32, &A32::UserCallbacks::MemoryWrite32>(code, ctx.reg_alloc, inst, config);
 }
 
 void A32EmitA64::EmitA32ExclusiveWriteMemory64(A32EmitContext& ctx, IR::Inst* inst) {
-    ExclusiveWrite<u64, &A32::UserCallbacks::MemoryWrite64>(code, ctx.reg_alloc, inst, config, true);
+    ExclusiveWrite<u64, &A32::UserCallbacks::MemoryWrite64>(code, ctx.reg_alloc, inst, config);
 }
 
 static void EmitCoprocessorException() {

@@ -307,8 +307,17 @@ void Jit::LoadContext(const Context& ctx) {
     impl->jit_state.TransferJitState(ctx.impl->jit_state, reset_rsb);
 }
 
-std::string Jit::Disassemble(const IR::LocationDescriptor& descriptor) {
-    return impl->Disassemble(descriptor);
+std::string Jit::Disassemble() const {
+    std::string result;
+#ifdef DYNARMIC_USE_LLVM
+    for (const u32* pos = reinterpret_cast<const u32*>(impl->block_of_code.GetCodeBegin());
+         reinterpret_cast<const u8*>(pos) < reinterpret_cast<const u8*>(impl->block_of_code.GetCodePtr()); pos += 1) {
+        fmt::print("0x{:02x} 0x{:02x} ", reinterpret_cast<u64>(pos), *pos);
+        fmt::print("{}", Common::DisassembleAArch64(*pos, reinterpret_cast<u64>(pos)));
+        result += Common::DisassembleAArch64(*pos, reinterpret_cast<u64>(pos));
+    }
+#endif
+    return result;
 }
 
 } // namespace Dynarmic::A32
