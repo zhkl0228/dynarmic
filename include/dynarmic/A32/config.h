@@ -57,6 +57,7 @@ struct UserCallbacks {
     // All reads through this callback are 4-byte aligned.
     // Memory must be interpreted as little endian.
     virtual std::uint32_t MemoryReadCode(VAddr vaddr) { return MemoryRead32(vaddr); }
+    virtual std::uint16_t MemoryReadThumbCode(VAddr vaddr) { return MemoryRead16(vaddr); }
 
     // Reads through these callbacks may not be aligned.
     // Memory must be interpreted as if ENDIANSTATE == 0, endianness will be corrected by the JIT.
