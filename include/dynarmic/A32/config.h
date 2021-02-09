@@ -10,6 +10,9 @@
 #include <cstdint>
 #include <memory>
 
+#include <dynarmic/A32/arch_version.h>
+#include <dynarmic/optimization_flags.h>
+
 namespace Dynarmic {
 class ExclusiveMonitor;
 } // namespace Dynarmic
@@ -27,6 +30,8 @@ enum class Exception {
     /// An unpredictable instruction is to be executed. Implementation-defined behaviour should now happen.
     /// This behaviour is up to the user of this library to define.
     UnpredictableInstruction,
+    /// A decode error occurred when decoding this instruction. This should never happen.
+    DecodeError,
     /// A SEV instruction was executed. The event register of all PEs should be set. (Hint instruction.)
     SendEvent,
     /// A SEVL instruction was executed. The event register of the current PE should be set. (Hint instruction.)
@@ -86,6 +91,8 @@ struct UserCallbacks {
 
     virtual void ExceptionRaised(VAddr pc, Exception exception) = 0;
 
+    virtual void InstructionSynchronizationBarrierRaised() {}
+
     // Timing-related callbacks
     // ticks ticks have passed
     virtual void AddTicks(std::uint64_t ticks) = 0;
@@ -99,13 +106,30 @@ struct UserConfig {
     size_t processor_id = 0;
     ExclusiveMonitor* global_monitor = nullptr;
 
-    /// When set to false, this disables all optimizations than can't otherwise be disabled
-    /// by setting other configuration options. This includes:
+    /// Select the architecture version to use.
+    /// There are minor behavioural differences between versions.
+    ArchVersion arch_version = ArchVersion::v8;
+
+    /// This selects other optimizations than can't otherwise be disabled by setting other
+    /// configuration options. This includes:
     /// - IR optimizations
     /// - Block linking optimizations
     /// - RSB optimizations
     /// This is intended to be used for debugging.
-    bool enable_optimizations = true;
+    OptimizationFlag optimizations = all_safe_optimizations;
+
+    bool HasOptimization(OptimizationFlag f) const {
+        if (!unsafe_optimizations) {
+            f &= all_safe_optimizations;
+        }
+        return (f & optimizations) != no_optimizations;
+    }
+
+    /// This enables unsafe optimizations that reduce emulation accuracy in favour of speed.
+    /// For safety, in order to enable unsafe optimizations you have to set BOTH this flag
+    /// AND the appropriate flag bits above.
+    /// The prefered and tested mode for this library is with unsafe optimizations disabled.
+    bool unsafe_optimizations = false;
 
     // Page Table
     // The page table is used for faster memory access. If an entry in the table is nullptr,
@@ -120,6 +144,11 @@ struct UserConfig {
     ///       So there might be wrongly faulted pages which maps to nullptr.
     ///       This can be avoided by carefully allocating the memory region.
     bool absolute_offset_page_table = false;
+    /// Masks out the first N bits in host pointers from the page table.
+    /// The intention behind this is to allow users of Dynarmic to pack attributes in the
+    /// same integer and update the pointer attribute pair atomically.
+    /// If the configured value is 3, all pointers will be forcefully aligned to 8 bytes.
+    int page_table_pointer_mask_bits = 0;
     /// Determines if we should detect memory accesses via page_table that straddle are
     /// misaligned. Accesses that straddle page boundaries will fallback to the relevant
     /// memory callback.
@@ -142,6 +171,11 @@ struct UserConfig {
     // Coprocessors
     std::array<std::shared_ptr<Coprocessor>, 16> coprocessors{};
 
+    /// When set to true, UserCallbacks::InstructionSynchronizationBarrierRaised will be
+    /// called when an ISB instruction is executed.
+    /// When set to false, ISB will be treated as a NOP instruction.
+    bool hook_isb = false;
+
     /// Hint instructions would cause ExceptionRaised to be called with the appropriate
     /// argument.
     bool hook_hint_instructions = false;
@@ -155,9 +189,6 @@ struct UserConfig {
     /// This tells the translator a wall clock will be used, thus allowing it
     /// to avoid writting certain unnecessary code only needed for cycle timers.
     bool wall_clock_cntpct = false;
-
-    /// This enables the fast dispatcher.
-    bool enable_fast_dispatch = true;
 
     /// This option relates to the CPSR.E flag. Enabling this option disables modification
     /// of CPSR.E by the emulated program, forcing it to 0.

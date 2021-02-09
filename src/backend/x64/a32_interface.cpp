@@ -102,6 +102,10 @@ struct Jit::Impl {
         emitter.ChangeProcessorID(value);
     }
 
+    void ClearExclusiveState() {
+        jit_state.exclusive_state = 0;
+    }
+
     std::string Disassemble(const IR::LocationDescriptor& descriptor) {
         auto block = GetBasicBlock(descriptor);
         std::string result = fmt::format("address: {}\nsize: {} bytes\n", block.entrypoint, block.size);
@@ -171,10 +175,12 @@ private:
             PerformCacheInvalidation();
         }
 
-        IR::Block ir_block = A32::Translate(A32::LocationDescriptor{descriptor}, [this](u32 vaddr) { return conf.callbacks->MemoryReadCode(vaddr); }, {conf.define_unpredictable_behaviour, conf.hook_hint_instructions});
-        if (conf.enable_optimizations) {
+        IR::Block ir_block = A32::Translate(A32::LocationDescriptor{descriptor}, [this](u32 vaddr) { return conf.callbacks->MemoryReadCode(vaddr); }, {conf.arch_version, conf.define_unpredictable_behaviour, conf.hook_hint_instructions});
+        if (conf.HasOptimization(OptimizationFlag::GetSetElimination)) {
             Optimization::A32GetSetElimination(ir_block);
             Optimization::DeadCodeElimination(ir_block);
+        }
+        if (conf.HasOptimization(OptimizationFlag::ConstProp)) {
             Optimization::A32ConstantMemoryReads(ir_block, conf.callbacks);
             Optimization::ConstantPropagation(ir_block);
             Optimization::DeadCodeElimination(ir_block);
@@ -234,6 +240,10 @@ void Jit::HaltExecution() {
 void Jit::ExceptionalExit() {
     impl->ExceptionalExit();
     is_executing = false;
+}
+
+void Jit::ClearExclusiveState() {
+    impl->ClearExclusiveState();
 }
 
 void Jit::ChangeProcessorID(size_t new_processor) {

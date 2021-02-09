@@ -1065,6 +1065,34 @@ U128 IREmitter::VectorDeinterleaveOdd(size_t esize, const U128& a, const U128& b
     UNREACHABLE();
 }
 
+U128 IREmitter::VectorDeinterleaveEvenLower(size_t esize, const U128& a, const U128& b) {
+    switch (esize) {
+    case 8:
+        return Inst<U128>(Opcode::VectorDeinterleaveEvenLower8, a, b);
+    case 16:
+        return Inst<U128>(Opcode::VectorDeinterleaveEvenLower16, a, b);
+    case 32:
+        return Inst<U128>(Opcode::VectorDeinterleaveEvenLower32, a, b);
+    case 64:
+        return Inst<U128>(Opcode::VectorDeinterleaveEvenLower64, a, b);
+    }
+    UNREACHABLE();
+}
+
+U128 IREmitter::VectorDeinterleaveOddLower(size_t esize, const U128& a, const U128& b) {
+    switch (esize) {
+    case 8:
+        return Inst<U128>(Opcode::VectorDeinterleaveOddLower8, a, b);
+    case 16:
+        return Inst<U128>(Opcode::VectorDeinterleaveOddLower16, a, b);
+    case 32:
+        return Inst<U128>(Opcode::VectorDeinterleaveOddLower32, a, b);
+    case 64:
+        return Inst<U128>(Opcode::VectorDeinterleaveOddLower64, a, b);
+    }
+    UNREACHABLE();
+}
+
 U128 IREmitter::VectorEor(const U128& a, const U128& b) {
     return Inst<U128>(Opcode::VectorEor, a, b);
 }
@@ -1761,6 +1789,20 @@ U128 IREmitter::VectorTableLookup(const U128& defaults, const Table& table, cons
     return Inst<U128>(Opcode::VectorTableLookup128, defaults, table, indices);
 }
 
+U128 IREmitter::VectorTranspose(size_t esize, const U128& a, const U128& b, bool part) {
+    switch (esize) {
+    case 8:
+        return Inst<U128>(Opcode::VectorTranspose8, a, b, Imm1(part));
+    case 16:
+        return Inst<U128>(Opcode::VectorTranspose16, a, b, Imm1(part));
+    case 32:
+        return Inst<U128>(Opcode::VectorTranspose32, a, b, Imm1(part));
+    case 64:
+        return Inst<U128>(Opcode::VectorTranspose64, a, b, Imm1(part));
+    }
+    UNREACHABLE();
+}
+
 U128 IREmitter::VectorUnsignedAbsoluteDifference(size_t esize, const U128& a, const U128& b) {
     switch (esize) {
     case 8:
@@ -1856,8 +1898,7 @@ U16U32U64 IREmitter::FPAbs(const U16U32U64& a) {
     }
 }
 
-U32U64 IREmitter::FPAdd(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPAdd(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -1870,8 +1911,7 @@ U32U64 IREmitter::FPAdd(const U32U64& a, const U32U64& b, bool fpcr_controlled) 
     }
 }
 
-NZCV IREmitter::FPCompare(const U32U64& a, const U32U64& b, bool exc_on_qnan, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+NZCV IREmitter::FPCompare(const U32U64& a, const U32U64& b, bool exc_on_qnan) {
     ASSERT(a.GetType() == b.GetType());
 
     const IR::U1 exc_on_qnan_imm = Imm1(exc_on_qnan);
@@ -1886,8 +1926,7 @@ NZCV IREmitter::FPCompare(const U32U64& a, const U32U64& b, bool exc_on_qnan, bo
     }
 }
 
-U32U64 IREmitter::FPDiv(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPDiv(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -1900,8 +1939,7 @@ U32U64 IREmitter::FPDiv(const U32U64& a, const U32U64& b, bool fpcr_controlled) 
     }
 }
 
-U32U64 IREmitter::FPMax(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPMax(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -1914,8 +1952,7 @@ U32U64 IREmitter::FPMax(const U32U64& a, const U32U64& b, bool fpcr_controlled) 
     }
 }
 
-U32U64 IREmitter::FPMaxNumeric(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPMaxNumeric(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -1928,8 +1965,7 @@ U32U64 IREmitter::FPMaxNumeric(const U32U64& a, const U32U64& b, bool fpcr_contr
     }
 }
 
-U32U64 IREmitter::FPMin(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPMin(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -1942,8 +1978,7 @@ U32U64 IREmitter::FPMin(const U32U64& a, const U32U64& b, bool fpcr_controlled) 
     }
 }
 
-U32U64 IREmitter::FPMinNumeric(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPMinNumeric(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -1956,8 +1991,7 @@ U32U64 IREmitter::FPMinNumeric(const U32U64& a, const U32U64& b, bool fpcr_contr
     }
 }
 
-U32U64 IREmitter::FPMul(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPMul(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -1970,8 +2004,7 @@ U32U64 IREmitter::FPMul(const U32U64& a, const U32U64& b, bool fpcr_controlled) 
     }
 }
 
-U16U32U64 IREmitter::FPMulAdd(const U16U32U64& a, const U16U32U64& b, const U16U32U64& c, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U16U32U64 IREmitter::FPMulAdd(const U16U32U64& a, const U16U32U64& b, const U16U32U64& c) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -2108,8 +2141,7 @@ U32U64 IREmitter::FPSqrt(const U32U64& a) {
     }
 }
 
-U32U64 IREmitter::FPSub(const U32U64& a, const U32U64& b, bool fpcr_controlled) {
-    ASSERT(fpcr_controlled);
+U32U64 IREmitter::FPSub(const U32U64& a, const U32U64& b) {
     ASSERT(a.GetType() == b.GetType());
 
     switch (a.GetType()) {
@@ -2146,6 +2178,24 @@ U16 IREmitter::FPSingleToHalf(const U32& a, FP::RoundingMode rounding) {
     return Inst<U16>(Opcode::FPSingleToHalf, a, Imm8(static_cast<u8>(rounding)));
 }
 
+U16 IREmitter::FPToFixedS16(const U16U32U64& a, size_t fbits, FP::RoundingMode rounding) {
+    ASSERT(fbits <= 16);
+
+    const U8 fbits_imm = Imm8(static_cast<u8>(fbits));
+    const U8 rounding_imm = Imm8(static_cast<u8>(rounding));
+
+    switch (a.GetType()) {
+    case Type::U16:
+        return Inst<U16>(Opcode::FPHalfToFixedS16, a, fbits_imm, rounding_imm);
+    case Type::U32:
+        return Inst<U16>(Opcode::FPSingleToFixedS16, a, fbits_imm, rounding_imm);
+    case Type::U64:
+        return Inst<U16>(Opcode::FPDoubleToFixedS16, a, fbits_imm, rounding_imm);
+    default:
+        UNREACHABLE();
+    }
+}
+
 U32 IREmitter::FPToFixedS32(const U16U32U64& a, size_t fbits, FP::RoundingMode rounding) {
     ASSERT(fbits <= 32);
 
@@ -2177,6 +2227,24 @@ U64 IREmitter::FPToFixedS64(const U16U32U64& a, size_t fbits, FP::RoundingMode r
         return Inst<U64>(Opcode::FPSingleToFixedS64, a, fbits_imm, rounding_imm);
     case Type::U64:
         return Inst<U64>(Opcode::FPDoubleToFixedS64, a, fbits_imm, rounding_imm);
+    default:
+        UNREACHABLE();
+    }
+}
+
+U16 IREmitter::FPToFixedU16(const U16U32U64& a, size_t fbits, FP::RoundingMode rounding) {
+    ASSERT(fbits <= 16);
+
+    const U8 fbits_imm = Imm8(static_cast<u8>(fbits));
+    const U8 rounding_imm = Imm8(static_cast<u8>(rounding));
+
+    switch (a.GetType()) {
+    case Type::U16:
+        return Inst<U16>(Opcode::FPHalfToFixedU16, a, fbits_imm, rounding_imm);
+    case Type::U32:
+        return Inst<U16>(Opcode::FPSingleToFixedU16, a, fbits_imm, rounding_imm);
+    case Type::U64:
+        return Inst<U16>(Opcode::FPDoubleToFixedU16, a, fbits_imm, rounding_imm);
     default:
         UNREACHABLE();
     }
@@ -2218,13 +2286,15 @@ U64 IREmitter::FPToFixedU64(const U16U32U64& a, size_t fbits, FP::RoundingMode r
     }
 }
 
-U32 IREmitter::FPSignedFixedToSingle(const U32U64& a, size_t fbits, FP::RoundingMode rounding) {
-    ASSERT(fbits <= (a.GetType() == Type::U32 ? 32 : 64));
+U32 IREmitter::FPSignedFixedToSingle(const U16U32U64& a, size_t fbits, FP::RoundingMode rounding) {
+    ASSERT(fbits <= (a.GetType() == Type::U16 ? 16 : (a.GetType() == Type::U32 ? 32 : 64)));
 
     const IR::U8 fbits_imm = Imm8(static_cast<u8>(fbits));
     const IR::U8 rounding_imm = Imm8(static_cast<u8>(rounding));
 
     switch (a.GetType()) {
+    case Type::U16:
+        return Inst<U32>(Opcode::FPFixedS16ToSingle, a, fbits_imm, rounding_imm);
     case Type::U32:
         return Inst<U32>(Opcode::FPFixedS32ToSingle, a, fbits_imm, rounding_imm);
     case Type::U64:
@@ -2234,13 +2304,15 @@ U32 IREmitter::FPSignedFixedToSingle(const U32U64& a, size_t fbits, FP::Rounding
     }
 }
 
-U32 IREmitter::FPUnsignedFixedToSingle(const U32U64& a, size_t fbits, FP::RoundingMode rounding) {
-    ASSERT(fbits <= (a.GetType() == Type::U32 ? 32 : 64));
+U32 IREmitter::FPUnsignedFixedToSingle(const U16U32U64& a, size_t fbits, FP::RoundingMode rounding) {
+    ASSERT(fbits <= (a.GetType() == Type::U16 ? 16 : (a.GetType() == Type::U32 ? 32 : 64)));
 
     const IR::U8 fbits_imm = Imm8(static_cast<u8>(fbits));
     const IR::U8 rounding_imm = Imm8(static_cast<u8>(rounding));
 
     switch (a.GetType()) {
+    case Type::U16:
+        return Inst<U32>(Opcode::FPFixedU16ToSingle, a, fbits_imm, rounding_imm);
     case Type::U32:
         return Inst<U32>(Opcode::FPFixedU32ToSingle, a, fbits_imm, rounding_imm);
     case Type::U64:
@@ -2250,13 +2322,15 @@ U32 IREmitter::FPUnsignedFixedToSingle(const U32U64& a, size_t fbits, FP::Roundi
     }
 }
 
-U64 IREmitter::FPSignedFixedToDouble(const U32U64& a, size_t fbits, FP::RoundingMode rounding) {
-    ASSERT(fbits <= (a.GetType() == Type::U32 ? 32 : 64));
+U64 IREmitter::FPSignedFixedToDouble(const U16U32U64& a, size_t fbits, FP::RoundingMode rounding) {
+    ASSERT(fbits <= (a.GetType() == Type::U16 ? 16 : (a.GetType() == Type::U32 ? 32 : 64)));
 
     const IR::U8 fbits_imm = Imm8(static_cast<u8>(fbits));
     const IR::U8 rounding_imm = Imm8(static_cast<u8>(rounding));
 
     switch (a.GetType()) {
+    case Type::U16:
+        return Inst<U64>(Opcode::FPFixedS16ToDouble, a, fbits_imm, rounding_imm);
     case Type::U32:
         return Inst<U64>(Opcode::FPFixedS32ToDouble, a, fbits_imm, rounding_imm);
     case Type::U64:
@@ -2266,13 +2340,15 @@ U64 IREmitter::FPSignedFixedToDouble(const U32U64& a, size_t fbits, FP::Rounding
     }
 }
 
-U64 IREmitter::FPUnsignedFixedToDouble(const U32U64& a, size_t fbits, FP::RoundingMode rounding) {
-    ASSERT(fbits <= (a.GetType() == Type::U32 ? 32 : 64));
+U64 IREmitter::FPUnsignedFixedToDouble(const U16U32U64& a, size_t fbits, FP::RoundingMode rounding) {
+    ASSERT(fbits <= (a.GetType() == Type::U16 ? 16 : (a.GetType() == Type::U32 ? 32 : 64)));
 
     const IR::U8 fbits_imm = Imm8(static_cast<u8>(fbits));
     const IR::U8 rounding_imm = Imm8(static_cast<u8>(rounding));
 
     switch (a.GetType()) {
+    case Type::U16:
+        return Inst<U64>(Opcode::FPFixedU16ToDouble, a, fbits_imm, rounding_imm);
     case Type::U32:
         return Inst<U64>(Opcode::FPFixedU32ToDouble, a, fbits_imm, rounding_imm);
     case Type::U64:
@@ -2304,12 +2380,12 @@ U128 IREmitter::FPVectorAdd(size_t esize, const U128& a, const U128& b, bool fpc
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorDiv(size_t esize, const U128& a, const U128& b) {
+U128 IREmitter::FPVectorDiv(size_t esize, const U128& a, const U128& b, bool fpcr_controlled) {
     switch (esize) {
     case 32:
-        return Inst<U128>(Opcode::FPVectorDiv32, a, b);
+        return Inst<U128>(Opcode::FPVectorDiv32, a, b, Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorDiv64, a, b);
+        return Inst<U128>(Opcode::FPVectorDiv64, a, b, Imm1(fpcr_controlled));
     }
     UNREACHABLE();
 }
@@ -2326,24 +2402,24 @@ U128 IREmitter::FPVectorEqual(size_t esize, const U128& a, const U128& b, bool f
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorFromSignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding) {
+U128 IREmitter::FPVectorFromSignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding, bool fpcr_controlled) {
     ASSERT(fbits <= esize);
     switch (esize) {
     case 32:
-        return Inst<U128>(Opcode::FPVectorFromSignedFixed32, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)));
+        return Inst<U128>(Opcode::FPVectorFromSignedFixed32, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)), Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorFromSignedFixed64, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)));
+        return Inst<U128>(Opcode::FPVectorFromSignedFixed64, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)), Imm1(fpcr_controlled));
     }
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorFromUnsignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding) {
+U128 IREmitter::FPVectorFromUnsignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding, bool fpcr_controlled) {
     ASSERT(fbits <= esize);
     switch (esize) {
     case 32:
-        return Inst<U128>(Opcode::FPVectorFromUnsignedFixed32, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)));
+        return Inst<U128>(Opcode::FPVectorFromUnsignedFixed32, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)), Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorFromUnsignedFixed64, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)));
+        return Inst<U128>(Opcode::FPVectorFromUnsignedFixed64, a, Imm8(static_cast<u8>(fbits)), Imm8(static_cast<u8>(rounding)), Imm1(fpcr_controlled));
     }
     UNREACHABLE();
 }
@@ -2398,24 +2474,24 @@ U128 IREmitter::FPVectorMul(size_t esize, const U128& a, const U128& b, bool fpc
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorMulAdd(size_t esize, const U128& a, const U128& b, const U128& c) {
+U128 IREmitter::FPVectorMulAdd(size_t esize, const U128& a, const U128& b, const U128& c, bool fpcr_controlled) {
     switch (esize) {
     case 16:
-        return Inst<U128>(Opcode::FPVectorMulAdd16, a, b, c);
+        return Inst<U128>(Opcode::FPVectorMulAdd16, a, b, c, Imm1(fpcr_controlled));
     case 32:
-        return Inst<U128>(Opcode::FPVectorMulAdd32, a, b, c);
+        return Inst<U128>(Opcode::FPVectorMulAdd32, a, b, c, Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorMulAdd64, a, b, c);
+        return Inst<U128>(Opcode::FPVectorMulAdd64, a, b, c, Imm1(fpcr_controlled));
     }
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorMulX(size_t esize, const U128& a, const U128& b) {
+U128 IREmitter::FPVectorMulX(size_t esize, const U128& a, const U128& b, bool fpcr_controlled) {
     switch (esize) {
     case 32:
-        return Inst<U128>(Opcode::FPVectorMulX32, a, b);
+        return Inst<U128>(Opcode::FPVectorMulX32, a, b, Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorMulX64, a, b);
+        return Inst<U128>(Opcode::FPVectorMulX64, a, b, Imm1(fpcr_controlled));
     }
     UNREACHABLE();
 }
@@ -2476,17 +2552,17 @@ U128 IREmitter::FPVectorRecipStepFused(size_t esize, const U128& a, const U128& 
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorRoundInt(size_t esize, const U128& operand, FP::RoundingMode rounding, bool exact) {
+U128 IREmitter::FPVectorRoundInt(size_t esize, const U128& operand, FP::RoundingMode rounding, bool exact, bool fpcr_controlled) {
     const IR::U8 rounding_imm = Imm8(static_cast<u8>(rounding));
     const IR::U1 exact_imm = Imm1(exact);
 
     switch (esize) {
     case 16:
-        return Inst<U128>(Opcode::FPVectorRoundInt16, operand, rounding_imm, exact_imm);
+        return Inst<U128>(Opcode::FPVectorRoundInt16, operand, rounding_imm, exact_imm, Imm1(fpcr_controlled));
     case 32:
-        return Inst<U128>(Opcode::FPVectorRoundInt32, operand, rounding_imm, exact_imm);
+        return Inst<U128>(Opcode::FPVectorRoundInt32, operand, rounding_imm, exact_imm, Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorRoundInt64, operand, rounding_imm, exact_imm);
+        return Inst<U128>(Opcode::FPVectorRoundInt64, operand, rounding_imm, exact_imm, Imm1(fpcr_controlled));
     }
     UNREACHABLE();
 }
@@ -2515,12 +2591,12 @@ U128 IREmitter::FPVectorRSqrtStepFused(size_t esize, const U128& a, const U128& 
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorSqrt(size_t esize, const U128& a) {
+U128 IREmitter::FPVectorSqrt(size_t esize, const U128& a, bool fpcr_controlled) {
     switch (esize) {
     case 32:
-        return Inst<U128>(Opcode::FPVectorSqrt32, a);
+        return Inst<U128>(Opcode::FPVectorSqrt32, a, Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorSqrt64, a);
+        return Inst<U128>(Opcode::FPVectorSqrt64, a, Imm1(fpcr_controlled));
     }
     UNREACHABLE();
 }
@@ -2535,7 +2611,7 @@ U128 IREmitter::FPVectorSub(size_t esize, const U128& a, const U128& b, bool fpc
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorToSignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding) {
+U128 IREmitter::FPVectorToSignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding, bool fpcr_controlled) {
     ASSERT(fbits <= esize);
 
     const U8 fbits_imm = Imm8(static_cast<u8>(fbits));
@@ -2543,17 +2619,17 @@ U128 IREmitter::FPVectorToSignedFixed(size_t esize, const U128& a, size_t fbits,
 
     switch (esize) {
     case 16:
-        return Inst<U128>(Opcode::FPVectorToSignedFixed16, a, fbits_imm, rounding_imm);
+        return Inst<U128>(Opcode::FPVectorToSignedFixed16, a, fbits_imm, rounding_imm, Imm1(fpcr_controlled));
     case 32:
-        return Inst<U128>(Opcode::FPVectorToSignedFixed32, a, fbits_imm, rounding_imm);
+        return Inst<U128>(Opcode::FPVectorToSignedFixed32, a, fbits_imm, rounding_imm, Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorToSignedFixed64, a, fbits_imm, rounding_imm);
+        return Inst<U128>(Opcode::FPVectorToSignedFixed64, a, fbits_imm, rounding_imm, Imm1(fpcr_controlled));
     }
 
     UNREACHABLE();
 }
 
-U128 IREmitter::FPVectorToUnsignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding) {
+U128 IREmitter::FPVectorToUnsignedFixed(size_t esize, const U128& a, size_t fbits, FP::RoundingMode rounding, bool fpcr_controlled) {
     ASSERT(fbits <= esize);
 
     const U8 fbits_imm = Imm8(static_cast<u8>(fbits));
@@ -2561,11 +2637,11 @@ U128 IREmitter::FPVectorToUnsignedFixed(size_t esize, const U128& a, size_t fbit
 
     switch (esize) {
     case 16:
-        return Inst<U128>(Opcode::FPVectorToUnsignedFixed16, a, fbits_imm, rounding_imm);
+        return Inst<U128>(Opcode::FPVectorToUnsignedFixed16, a, fbits_imm, rounding_imm, Imm1(fpcr_controlled));
     case 32:
-        return Inst<U128>(Opcode::FPVectorToUnsignedFixed32, a, fbits_imm, rounding_imm);
+        return Inst<U128>(Opcode::FPVectorToUnsignedFixed32, a, fbits_imm, rounding_imm, Imm1(fpcr_controlled));
     case 64:
-        return Inst<U128>(Opcode::FPVectorToUnsignedFixed64, a, fbits_imm, rounding_imm);
+        return Inst<U128>(Opcode::FPVectorToUnsignedFixed64, a, fbits_imm, rounding_imm, Imm1(fpcr_controlled));
     }
 
     UNREACHABLE();

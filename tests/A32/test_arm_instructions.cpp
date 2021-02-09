@@ -13,7 +13,7 @@ using namespace Dynarmic;
 
 static A32::UserConfig GetUserConfig(ArmTestEnv* testenv) {
     A32::UserConfig user_config;
-    user_config.enable_fast_dispatch = false;
+    user_config.optimizations &= ~OptimizationFlag::FastDispatch;
     user_config.callbacks = testenv;
     return user_config;
 }
@@ -243,7 +243,7 @@ TEST_CASE("arm: Test InvalidateCacheRange", "[arm][A32]") {
 TEST_CASE("arm: Step blx", "[arm]") {
     ArmTestEnv test_env;
     A32::UserConfig config = GetUserConfig(&test_env);
-    config.enable_fast_dispatch = true;
+    config.optimizations |= OptimizationFlag::FastDispatch;
     Dynarmic::A32::Jit jit{config};
     test_env.code_mem = {
         0xe12fff30, // blx r0
@@ -271,7 +271,7 @@ TEST_CASE("arm: Step blx", "[arm]") {
 TEST_CASE("arm: Step bx", "[arm]") {
     ArmTestEnv test_env;
     A32::UserConfig config = GetUserConfig(&test_env);
-    config.enable_fast_dispatch = true;
+    config.optimizations |= OptimizationFlag::FastDispatch;
     Dynarmic::A32::Jit jit{config};
     test_env.code_mem = {
         0xe12fff10, // bx r0
@@ -484,4 +484,24 @@ TEST_CASE("arm: vclt.f32 with zero", "[arm][A32]") {
 
     REQUIRE(jit.ExtRegs()[6] == 0x00000000);
     REQUIRE(jit.ExtRegs()[7] == 0x00000000);
+}
+
+TEST_CASE("arm: vcvt.s16.f64", "[arm][A32]") {
+    ArmTestEnv test_env;
+    A32::Jit jit{GetUserConfig(&test_env)};
+    test_env.code_mem = {
+        0xeebe8b45, // vcvt.s16.f64 d8, d8, #6
+        0xeafffffe, // b +#0
+    };
+
+    jit.ExtRegs()[16] = 0x9a7110b0;
+    jit.ExtRegs()[17] = 0xcd78f4e7;
+
+    jit.SetCpsr(0x000001d0); // User-mode
+
+    test_env.ticks_left = 2;
+    jit.Run();
+
+    REQUIRE(jit.ExtRegs()[16] == 0xffff8000);
+    REQUIRE(jit.ExtRegs()[17] == 0xffffffff);
 }

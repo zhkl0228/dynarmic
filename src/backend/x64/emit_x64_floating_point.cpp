@@ -14,6 +14,8 @@
 #include <mp/typelist/list.h>
 #include <mp/typelist/lower_to_tuple.h>
 
+#include <dynarmic/optimization_flags.h>
+
 #include "backend/x64/abi.h"
 #include "backend/x64/block_of_code.h"
 #include "backend/x64/emit_x64.h"
@@ -50,6 +52,10 @@ constexpr u64 f64_nan = 0x7ff8000000000000u;
 constexpr u64 f64_non_sign_mask = 0x7fffffffffffffffu;
 constexpr u64 f64_smallest_normal = 0x0010000000000000u;
 
+constexpr u64 f64_min_s16 = 0xc0e0000000000000u; // -32768 as a double
+constexpr u64 f64_max_s16 = 0x40dfffc000000000u; // 32767 as a double
+constexpr u64 f64_min_u16 = 0x0000000000000000u; // 0 as a double
+constexpr u64 f64_max_u16 = 0x40efffe000000000u; // 65535 as a double
 constexpr u64 f64_max_s32 = 0x41dfffffffc00000u; // 2147483647 as a double
 constexpr u64 f64_min_u32 = 0x0000000000000000u; // 0 as a double
 constexpr u64 f64_max_u32 = 0x41efffffffe00000u; // 4294967295 as a double
@@ -57,18 +63,22 @@ constexpr u64 f64_max_s64_lim = 0x43e0000000000000u; // 2^63 as a double (actual
 constexpr u64 f64_min_u64 = 0x0000000000000000u; // 0 as a double
 constexpr u64 f64_max_u64_lim = 0x43f0000000000000u; // 2^64 as a double (actual maximum unrepresentable)
 
-template<size_t fsize, typename T>
-T ChooseOnFsize([[maybe_unused]] T f32, [[maybe_unused]] T f64) {
-    static_assert(fsize == 32 || fsize == 64, "fsize must be either 32 or 64");
-
-    if constexpr (fsize == 32) {
-        return f32;
-    } else {
-        return f64;
+#define FCODE(NAME)                                                                         \
+    [&code](auto... args){                                                                  \
+        if constexpr (fsize == 32) {                                                        \
+            code.NAME##s(args...);                                                          \
+        } else {                                                                            \
+            code.NAME##d(args...);                                                          \
+        }                                                                                   \
     }
-}
-
-#define FCODE(NAME) (code.*ChooseOnFsize<fsize>(&Xbyak::CodeGenerator::NAME##s, &Xbyak::CodeGenerator::NAME##d))
+#define ICODE(NAME)                                                                         \
+    [&code](auto... args){                                                                  \
+        if constexpr (fsize == 32) {                                                        \
+            code.NAME##d(args...);                                                          \
+        } else {                                                                            \
+            code.NAME##q(args...);                                                          \
+        }                                                                                   \
+    }
 
 std::optional<int> ConvertRoundingModeToX64Immediate(FP::RoundingMode rounding_mode) {
     switch (rounding_mode) {
@@ -144,17 +154,10 @@ Xbyak::Label ProcessNaN(BlockOfCode& code, Xbyak::Xmm a) {
 
 template<size_t fsize>
 void PostProcessNaN(BlockOfCode& code, Xbyak::Xmm result, Xbyak::Xmm tmp) {
-    if constexpr (fsize == 32) {
-        code.movaps(tmp, result);
-        code.cmpunordps(tmp, tmp);
-        code.pslld(tmp, 31);
-        code.xorps(result, tmp);
-    } else {
-        code.movaps(tmp, result);
-        code.cmpunordpd(tmp, tmp);
-        code.psllq(tmp, 63);
-        code.xorps(result, tmp);
-    }
+    code.movaps(tmp, result);
+    FCODE(cmpunordp)(tmp, tmp);
+    ICODE(psll)(tmp, int(fsize - 1));
+    code.xorps(result, tmp);
 }
 
 // This is necessary because x86 and ARM differ in they way they return NaNs from floating point operations
@@ -254,7 +257,7 @@ void FPTwoOp(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst, Function fn) {
 
     Xbyak::Xmm result = ctx.reg_alloc.UseScratchXmm(args[0]);
 
-    if (ctx.AccurateNaN() && !ctx.FPCR().DN()) {
+    if (!ctx.FPCR().DN() && !ctx.HasOptimization(OptimizationFlag::Unsafe_InaccurateNaN)) {
         end = ProcessNaN<fsize>(code, result);
     }
     if constexpr (std::is_member_function_pointer_v<Function>) {
@@ -262,9 +265,11 @@ void FPTwoOp(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst, Function fn) {
     } else {
         fn(result);
     }
-    if (ctx.FPCR().DN()) {
+    if (ctx.HasOptimization(OptimizationFlag::Unsafe_InaccurateNaN)) {
+        // Do nothing
+    } else if (ctx.FPCR().DN()) {
         ForceToDefaultNaN<fsize>(code, result);
-    } else if (ctx.AccurateNaN()) {
+    } else {
         PostProcessNaN<fsize>(code, result, ctx.reg_alloc.ScratchXmm());
     }
     code.L(end);
@@ -278,7 +283,7 @@ void FPThreeOp(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst, Function fn)
 
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (ctx.FPCR().DN() || !ctx.AccurateNaN()) {
+    if (ctx.FPCR().DN() || ctx.HasOptimization(OptimizationFlag::Unsafe_InaccurateNaN)) {
         const Xbyak::Xmm result = ctx.reg_alloc.UseScratchXmm(args[0]);
         const Xbyak::Xmm operand = ctx.reg_alloc.UseScratchXmm(args[1]);
 
@@ -288,7 +293,7 @@ void FPThreeOp(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst, Function fn)
             fn(result, operand);
         }
 
-        if (ctx.AccurateNaN()) {
+        if (!ctx.HasOptimization(OptimizationFlag::Unsafe_InaccurateNaN)) {
             ForceToDefaultNaN<fsize>(code, result);
         }
 
@@ -433,7 +438,7 @@ static void EmitFPMinMax(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
     code.jmp(end);
 
     code.L(nan);
-    if (ctx.FPCR().DN() || !ctx.AccurateNaN()) {
+    if (ctx.FPCR().DN()) {
         code.movaps(result, code.MConst(xword, fsize == 32 ? f32_nan : f64_nan));
         code.jmp(end);
     } else {
@@ -588,10 +593,21 @@ template<size_t fsize>
 static void EmitFPMulAdd(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
     using FPT = mp::unsigned_integer_of_size<fsize>;
 
-    if constexpr (fsize != 16) {
-        if (code.HasFMA()) {
-            auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
+    if constexpr (fsize != 16) {
+        if (code.HasFMA() && ctx.HasOptimization(OptimizationFlag::Unsafe_InaccurateNaN)) {
+            const Xbyak::Xmm result = ctx.reg_alloc.UseScratchXmm(args[0]);
+            const Xbyak::Xmm operand2 = ctx.reg_alloc.UseXmm(args[1]);
+            const Xbyak::Xmm operand3 = ctx.reg_alloc.UseXmm(args[2]);
+
+            FCODE(vfmadd231s)(result, operand2, operand3);
+
+            ctx.reg_alloc.DefineValue(inst, result);
+            return;
+        }
+
+        if (code.HasFMA()) {
             Xbyak::Label end, fallback;
 
             const Xbyak::Xmm operand1 = ctx.reg_alloc.UseXmm(args[0]);
@@ -638,9 +654,20 @@ static void EmitFPMulAdd(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
             ctx.reg_alloc.DefineValue(inst, result);
             return;
         }
+
+        if (ctx.HasOptimization(OptimizationFlag::Unsafe_UnfuseFMA)) {
+            const Xbyak::Xmm operand1 = ctx.reg_alloc.UseScratchXmm(args[0]);
+            const Xbyak::Xmm operand2 = ctx.reg_alloc.UseScratchXmm(args[1]);
+            const Xbyak::Xmm operand3 = ctx.reg_alloc.UseXmm(args[2]);
+
+            FCODE(muls)(operand2, operand3);
+            FCODE(adds)(operand1, operand2);
+
+            ctx.reg_alloc.DefineValue(inst, operand1);
+            return;
+        }
     }
 
-    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
     ctx.reg_alloc.HostCall(inst, args[0], args[1], args[2]);
     code.mov(code.ABI_PARAM4.cvt32(), ctx.FPCR().Value());
 #ifdef _WIN32
@@ -673,7 +700,7 @@ static void EmitFPMulX(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
 
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    const bool do_default_nan = ctx.FPCR().DN() || !ctx.AccurateNaN();
+    const bool do_default_nan = ctx.FPCR().DN();
 
     const Xbyak::Xmm op1 = ctx.reg_alloc.UseXmm(args[0]);
     const Xbyak::Xmm op2 = ctx.reg_alloc.UseXmm(args[1]);
@@ -725,8 +752,29 @@ void EmitX64::EmitFPMulX64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPMulX<64>(code, ctx, inst);
 }
 
-template<typename FPT>
+template<size_t fsize>
 static void EmitFPRecipEstimate(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
+    using FPT = mp::unsigned_integer_of_size<fsize>;
+
+    if constexpr (fsize != 16) {
+        if (ctx.HasOptimization(OptimizationFlag::Unsafe_ReducedErrorFP)) {
+            auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+            const Xbyak::Xmm operand = ctx.reg_alloc.UseXmm(args[0]);
+            const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+
+            if constexpr (fsize == 32) {
+                code.rcpss(result, operand);
+            } else {
+                code.cvtsd2ss(result, operand);
+                code.rcpss(result, result);
+                code.cvtss2sd(result, result);
+            }
+
+            ctx.reg_alloc.DefineValue(inst, result);
+            return;
+        }
+    }
+
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
     ctx.reg_alloc.HostCall(inst, args[0]);
     code.mov(code.ABI_PARAM2.cvt32(), ctx.FPCR().Value());
@@ -735,19 +783,21 @@ static void EmitFPRecipEstimate(BlockOfCode& code, EmitContext& ctx, IR::Inst* i
 }
 
 void EmitX64::EmitFPRecipEstimate16(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRecipEstimate<u16>(code, ctx, inst);
+    EmitFPRecipEstimate<16>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPRecipEstimate32(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRecipEstimate<u32>(code, ctx, inst);
+    EmitFPRecipEstimate<32>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPRecipEstimate64(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRecipEstimate<u64>(code, ctx, inst);
+    EmitFPRecipEstimate<64>(code, ctx, inst);
 }
 
-template <typename FPT>
+template <size_t fsize>
 static void EmitFPRecipExponent(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
+    using FPT = mp::unsigned_integer_of_size<fsize>;
+
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
     ctx.reg_alloc.HostCall(inst, args[0]);
     code.mov(code.ABI_PARAM2.cvt32(), ctx.FPCR().Value());
@@ -756,25 +806,39 @@ static void EmitFPRecipExponent(BlockOfCode& code, EmitContext& ctx, IR::Inst* i
 }
 
 void EmitX64::EmitFPRecipExponent16(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRecipExponent<u16>(code, ctx, inst);
+    EmitFPRecipExponent<16>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPRecipExponent32(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRecipExponent<u32>(code, ctx, inst);
+    EmitFPRecipExponent<32>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPRecipExponent64(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRecipExponent<u64>(code, ctx, inst);
+    EmitFPRecipExponent<64>(code, ctx, inst);
 }
 
 template<size_t fsize>
 static void EmitFPRecipStepFused(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
     using FPT = mp::unsigned_integer_of_size<fsize>;
 
-    if constexpr (fsize != 16) {
-        if (code.HasFMA()) {
-            auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
+    if constexpr (fsize != 16) {
+        if (code.HasFMA() && ctx.HasOptimization(OptimizationFlag::Unsafe_InaccurateNaN)) {
+            Xbyak::Label end, fallback;
+
+            const Xbyak::Xmm operand1 = ctx.reg_alloc.UseXmm(args[0]);
+            const Xbyak::Xmm operand2 = ctx.reg_alloc.UseXmm(args[1]);
+            const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+
+            code.movaps(result, code.MConst(xword, FP::FPValue<FPT, false, 0, 2>()));
+            FCODE(vfnmadd231s)(result, operand1, operand2);
+
+            ctx.reg_alloc.DefineValue(inst, result);
+            return;
+        }
+
+        if (code.HasFMA()) {
             Xbyak::Label end, fallback;
 
             const Xbyak::Xmm operand1 = ctx.reg_alloc.UseXmm(args[0]);
@@ -807,9 +871,21 @@ static void EmitFPRecipStepFused(BlockOfCode& code, EmitContext& ctx, IR::Inst* 
             ctx.reg_alloc.DefineValue(inst, result);
             return;
         }
+
+        if (ctx.HasOptimization(OptimizationFlag::Unsafe_UnfuseFMA)) {
+            const Xbyak::Xmm operand1 = ctx.reg_alloc.UseScratchXmm(args[0]);
+            const Xbyak::Xmm operand2 = ctx.reg_alloc.UseXmm(args[1]);
+            const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+
+            code.movaps(result, code.MConst(xword, FP::FPValue<FPT, false, 0, 2>()));
+            FCODE(muls)(operand1, operand2);
+            FCODE(subs)(result, operand1);
+
+            ctx.reg_alloc.DefineValue(inst, result);
+            return;
+        }
     }
 
-    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
     ctx.reg_alloc.HostCall(inst, args[0], args[1]);
     code.mov(code.ABI_PARAM3.cvt32(), ctx.FPCR().Value());
     code.lea(code.ABI_PARAM4, code.ptr[code.r15 + code.GetJitStateInfo().offsetof_fpsr_exc]);
@@ -898,8 +974,29 @@ void EmitX64::EmitFPRoundInt64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPRound(code, ctx, inst, 64);
 }
 
-template<typename FPT>
+template<size_t fsize>
 static void EmitFPRSqrtEstimate(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
+    using FPT = mp::unsigned_integer_of_size<fsize>;
+
+    if constexpr (fsize != 16) {
+        if (ctx.HasOptimization(OptimizationFlag::Unsafe_ReducedErrorFP)) {
+            auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+            const Xbyak::Xmm operand = ctx.reg_alloc.UseXmm(args[0]);
+            const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+
+            if constexpr (fsize == 32) {
+                code.rsqrtss(result, operand);
+            } else {
+                code.cvtsd2ss(result, operand);
+                code.rsqrtss(result, result);
+                code.cvtss2sd(result, result);
+            }
+
+            ctx.reg_alloc.DefineValue(inst, result);
+            return;
+        }
+    }
+
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
     ctx.reg_alloc.HostCall(inst, args[0]);
     code.mov(code.ABI_PARAM2.cvt32(), ctx.FPCR().Value());
@@ -908,25 +1005,38 @@ static void EmitFPRSqrtEstimate(BlockOfCode& code, EmitContext& ctx, IR::Inst* i
 }
 
 void EmitX64::EmitFPRSqrtEstimate16(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRSqrtEstimate<u16>(code, ctx, inst);
+    EmitFPRSqrtEstimate<16>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPRSqrtEstimate32(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRSqrtEstimate<u32>(code, ctx, inst);
+    EmitFPRSqrtEstimate<32>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPRSqrtEstimate64(EmitContext& ctx, IR::Inst* inst) {
-    EmitFPRSqrtEstimate<u64>(code, ctx, inst);
+    EmitFPRSqrtEstimate<64>(code, ctx, inst);
 }
 
 template<size_t fsize>
 static void EmitFPRSqrtStepFused(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
     using FPT = mp::unsigned_integer_of_size<fsize>;
 
-    if constexpr (fsize != 16) {
-        if (code.HasFMA() && code.HasAVX()) {
-            auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
+    if constexpr (fsize != 16) {
+        if (code.HasFMA() && code.HasAVX() && ctx.HasOptimization(OptimizationFlag::Unsafe_InaccurateNaN)) {
+            const Xbyak::Xmm operand1 = ctx.reg_alloc.UseXmm(args[0]);
+            const Xbyak::Xmm operand2 = ctx.reg_alloc.UseXmm(args[1]);
+            const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+
+            code.vmovaps(result, code.MConst(xword, FP::FPValue<FPT, false, 0, 3>()));
+            FCODE(vfnmadd231s)(result, operand1, operand2);
+            FCODE(vmuls)(result, result, code.MConst(xword, FP::FPValue<FPT, false, -1, 1>()));
+
+            ctx.reg_alloc.DefineValue(inst, result);
+            return;
+        }
+
+        if (code.HasFMA() && code.HasAVX()) {
             Xbyak::Label end, fallback;
 
             const Xbyak::Xmm operand1 = ctx.reg_alloc.UseXmm(args[0]);
@@ -971,9 +1081,22 @@ static void EmitFPRSqrtStepFused(BlockOfCode& code, EmitContext& ctx, IR::Inst* 
             ctx.reg_alloc.DefineValue(inst, result);
             return;
         }
+
+        if (ctx.HasOptimization(OptimizationFlag::Unsafe_UnfuseFMA)) {
+            const Xbyak::Xmm operand1 = ctx.reg_alloc.UseScratchXmm(args[0]);
+            const Xbyak::Xmm operand2 = ctx.reg_alloc.UseXmm(args[1]);
+            const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+
+            code.movaps(result, code.MConst(xword, FP::FPValue<FPT, false, 0, 3>()));
+            FCODE(muls)(operand1, operand2);
+            FCODE(subs)(result, operand1);
+            FCODE(muls)(result, code.MConst(xword, FP::FPValue<FPT, false, -1, 1>()));
+
+            ctx.reg_alloc.DefineValue(inst, operand1);
+            return;
+        }
     }
 
-    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
     ctx.reg_alloc.HostCall(inst, args[0], args[1]);
     code.mov(code.ABI_PARAM3.cvt32(), ctx.FPCR().Value());
     code.lea(code.ABI_PARAM4, code.ptr[code.r15 + code.GetJitStateInfo().offsetof_fpsr_exc]);
@@ -1262,7 +1385,7 @@ static void EmitFPToFixed(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
                 code.mov(result, unsigned_ ? 0xFFFF'FFFF'FFFF'FFFF : 0x7FFF'FFFF'FFFF'FFFF);
                 code.jmp(end, code.T_NEAR);
                 code.SwitchToNearCode();
-            } else {
+            } else if constexpr (isize == 32) {
                 code.minsd(src, code.MConst(xword, unsigned_ ? f64_max_u32 : f64_max_s32));
                 if (unsigned_) {
                     code.maxsd(src, code.MConst(xword, f64_min_u32));
@@ -1270,6 +1393,10 @@ static void EmitFPToFixed(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
                 } else {
                     code.cvttsd2si(result.cvt32(), src);
                 }
+            } else {
+                code.minsd(src, code.MConst(xword, unsigned_ ? f64_max_u16 : f64_max_s16));
+                code.maxsd(src, code.MConst(xword, unsigned_ ? f64_min_u16 : f64_min_s16));
+                code.cvttsd2si(result, src); // 64 bit gpr
             }
 
             ctx.reg_alloc.DefineValue(inst, result);
@@ -1312,12 +1439,20 @@ static void EmitFPToFixed(BlockOfCode& code, EmitContext& ctx, IR::Inst* inst) {
     code.CallFunction(lut.at(std::make_tuple(fbits, rounding_mode)));
 }
 
+void EmitX64::EmitFPDoubleToFixedS16(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPToFixed<64, false, 16>(code, ctx, inst);
+}
+
 void EmitX64::EmitFPDoubleToFixedS32(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<64, false, 32>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPDoubleToFixedS64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<64, false, 64>(code, ctx, inst);
+}
+
+void EmitX64::EmitFPDoubleToFixedU16(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPToFixed<64, true, 16>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPDoubleToFixedU32(EmitContext& ctx, IR::Inst* inst) {
@@ -1328,12 +1463,20 @@ void EmitX64::EmitFPDoubleToFixedU64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<64, true, 64>(code, ctx, inst);
 }
 
+void EmitX64::EmitFPHalfToFixedS16(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPToFixed<16, false, 16>(code, ctx, inst);
+}
+
 void EmitX64::EmitFPHalfToFixedS32(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<16, false, 32>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPHalfToFixedS64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<16, false, 64>(code, ctx, inst);
+}
+
+void EmitX64::EmitFPHalfToFixedU16(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPToFixed<16, true, 16>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPHalfToFixedU32(EmitContext& ctx, IR::Inst* inst) {
@@ -1344,12 +1487,20 @@ void EmitX64::EmitFPHalfToFixedU64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<16, true, 64>(code, ctx, inst);
 }
 
+void EmitX64::EmitFPSingleToFixedS16(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPToFixed<32, false, 16>(code, ctx, inst);
+}
+
 void EmitX64::EmitFPSingleToFixedS32(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<32, false, 32>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPSingleToFixedS64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<32, false, 64>(code, ctx, inst);
+}
+
+void EmitX64::EmitFPSingleToFixedU16(EmitContext& ctx, IR::Inst* inst) {
+    EmitFPToFixed<32, true, 16>(code, ctx, inst);
 }
 
 void EmitX64::EmitFPSingleToFixedU32(EmitContext& ctx, IR::Inst* inst) {
@@ -1360,6 +1511,46 @@ void EmitX64::EmitFPSingleToFixedU64(EmitContext& ctx, IR::Inst* inst) {
     EmitFPToFixed<32, true, 64>(code, ctx, inst);
 }
 
+void EmitX64::EmitFPFixedS16ToSingle(EmitContext& ctx, IR::Inst* inst) {
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+
+    const Xbyak::Reg16 from = ctx.reg_alloc.UseGpr(args[0]).cvt16();
+    const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
+    const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+    const size_t fbits = args[1].GetImmediateU8();
+    [[maybe_unused]] const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8()); // Not required
+
+    code.movsx(tmp, from);
+    code.cvtsi2ss(result, tmp);
+
+    if (fbits != 0) {
+        const u32 scale_factor = static_cast<u32>((127 - fbits) << 23);
+        code.mulss(result, code.MConst(xword, scale_factor));
+    }
+
+    ctx.reg_alloc.DefineValue(inst, result);
+}
+
+void EmitX64::EmitFPFixedU16ToSingle(EmitContext& ctx, IR::Inst* inst) {
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+
+    const Xbyak::Reg16 from = ctx.reg_alloc.UseGpr(args[0]).cvt16();
+    const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
+    const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+    const size_t fbits = args[1].GetImmediateU8();
+    [[maybe_unused]] const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8()); // Not required
+
+    code.movzx(tmp, from);
+    code.cvtsi2ss(result, tmp);
+
+    if (fbits != 0) {
+        const u32 scale_factor = static_cast<u32>((127 - fbits) << 23);
+        code.mulss(result, code.MConst(xword, scale_factor));
+    }
+
+    ctx.reg_alloc.DefineValue(inst, result);
+}
+
 void EmitX64::EmitFPFixedS32ToSingle(EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
@@ -1367,9 +1558,15 @@ void EmitX64::EmitFPFixedS32ToSingle(EmitContext& ctx, IR::Inst* inst) {
     const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
     const size_t fbits = args[1].GetImmediateU8();
     const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8());
-    ASSERT(rounding_mode == ctx.FPCR().RMode());
 
-    code.cvtsi2ss(result, from);
+    if (rounding_mode == ctx.FPCR().RMode()) {
+        code.cvtsi2ss(result, from);
+    } else {
+        ASSERT(rounding_mode == FP::RoundingMode::ToNearest_TieEven);
+        code.EnterStandardASIMD();
+        code.cvtsi2ss(result, from);
+        code.LeaveStandardASIMD();
+    }
 
     if (fbits != 0) {
         const u32 scale_factor = static_cast<u32>((127 - fbits) << 23);
@@ -1385,21 +1582,71 @@ void EmitX64::EmitFPFixedU32ToSingle(EmitContext& ctx, IR::Inst* inst) {
     const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
     const size_t fbits = args[1].GetImmediateU8();
     const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8());
-    ASSERT(rounding_mode == ctx.FPCR().RMode());
 
-    if (code.HasAVX512_Skylake()) {
-        const Xbyak::Reg64 from = ctx.reg_alloc.UseGpr(args[0]);
-        code.vcvtusi2ss(result, result, from.cvt32());
+    const auto op = [&]{
+        if (code.HasAVX512_Skylake()) {
+            const Xbyak::Reg64 from = ctx.reg_alloc.UseGpr(args[0]);
+            code.vcvtusi2ss(result, result, from.cvt32());
+        } else {
+            // We are using a 64-bit GPR register to ensure we don't end up treating the input as signed
+            const Xbyak::Reg64 from = ctx.reg_alloc.UseScratchGpr(args[0]);
+            code.mov(from.cvt32(), from.cvt32()); // TODO: Verify if this is necessary
+            code.cvtsi2ss(result, from);
+        }
+    };
+
+    if (rounding_mode == ctx.FPCR().RMode()) {
+        op();
     } else {
-        // We are using a 64-bit GPR register to ensure we don't end up treating the input as signed
-        const Xbyak::Reg64 from = ctx.reg_alloc.UseScratchGpr(args[0]);
-        code.mov(from.cvt32(), from.cvt32()); // TODO: Verify if this is necessary
-        code.cvtsi2ss(result, from);
+        ASSERT(rounding_mode == FP::RoundingMode::ToNearest_TieEven);
+        code.EnterStandardASIMD();
+        op();
+        code.LeaveStandardASIMD();
     }
 
     if (fbits != 0) {
         const u32 scale_factor = static_cast<u32>((127 - fbits) << 23);
         code.mulss(result, code.MConst(xword, scale_factor));
+    }
+
+    ctx.reg_alloc.DefineValue(inst, result);
+}
+
+void EmitX64::EmitFPFixedS16ToDouble(EmitContext& ctx, IR::Inst* inst) {
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+
+    const Xbyak::Reg16 from = ctx.reg_alloc.UseGpr(args[0]).cvt16();
+    const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
+    const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+    const size_t fbits = args[1].GetImmediateU8();
+    [[maybe_unused]] const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8()); // Not required
+
+    code.movsx(tmp, from);
+    code.cvtsi2sd(result, tmp);
+
+    if (fbits != 0) {
+        const u64 scale_factor = static_cast<u64>((1023 - fbits) << 52);
+        code.mulsd(result, code.MConst(xword, scale_factor));
+    }
+
+    ctx.reg_alloc.DefineValue(inst, result);
+}
+
+void EmitX64::EmitFPFixedU16ToDouble(EmitContext& ctx, IR::Inst* inst) {
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+
+    const Xbyak::Reg16 from = ctx.reg_alloc.UseGpr(args[0]).cvt16();
+    const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
+    const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+    const size_t fbits = args[1].GetImmediateU8();
+    [[maybe_unused]] const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8()); // Not required
+
+    code.movzx(tmp, from);
+    code.cvtsi2sd(result, tmp);
+
+    if (fbits != 0) {
+        const u64 scale_factor = static_cast<u64>((1023 - fbits) << 52);
+        code.mulsd(result, code.MConst(xword, scale_factor));
     }
 
     ctx.reg_alloc.DefineValue(inst, result);
@@ -1411,8 +1658,7 @@ void EmitX64::EmitFPFixedS32ToDouble(EmitContext& ctx, IR::Inst* inst) {
     const Xbyak::Reg32 from = ctx.reg_alloc.UseGpr(args[0]).cvt32();
     const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
     const size_t fbits = args[1].GetImmediateU8();
-    const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8());
-    ASSERT(rounding_mode == ctx.FPCR().RMode());
+    [[maybe_unused]] const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8()); // Not required
 
     code.cvtsi2sd(result, from);
 
@@ -1422,6 +1668,31 @@ void EmitX64::EmitFPFixedS32ToDouble(EmitContext& ctx, IR::Inst* inst) {
     }
 
     ctx.reg_alloc.DefineValue(inst, result);
+}
+
+void EmitX64::EmitFPFixedU32ToDouble(EmitContext& ctx, IR::Inst* inst) {
+    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+
+    const Xbyak::Xmm to = ctx.reg_alloc.ScratchXmm();
+    const size_t fbits = args[1].GetImmediateU8();
+    [[maybe_unused]] const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8()); // Not required
+
+    if (code.HasAVX512_Skylake()) {
+        const Xbyak::Reg64 from = ctx.reg_alloc.UseGpr(args[0]);
+        code.vcvtusi2sd(to, to, from.cvt32());
+    } else {
+        // We are using a 64-bit GPR register to ensure we don't end up treating the input as signed
+        const Xbyak::Reg64 from = ctx.reg_alloc.UseScratchGpr(args[0]);
+        code.mov(from.cvt32(), from.cvt32()); // TODO: Verify if this is necessary
+        code.cvtsi2sd(to, from);
+    }
+
+    if (fbits != 0) {
+        const u64 scale_factor = static_cast<u64>((1023 - fbits) << 52);
+        code.mulsd(to, code.MConst(xword, scale_factor));
+    }
+
+    ctx.reg_alloc.DefineValue(inst, to);
 }
 
 void EmitX64::EmitFPFixedS64ToDouble(EmitContext& ctx, IR::Inst* inst) {
@@ -1460,32 +1731,6 @@ void EmitX64::EmitFPFixedS64ToSingle(EmitContext& ctx, IR::Inst* inst) {
     }
 
     ctx.reg_alloc.DefineValue(inst, result);
-}
-
-void EmitX64::EmitFPFixedU32ToDouble(EmitContext& ctx, IR::Inst* inst) {
-    auto args = ctx.reg_alloc.GetArgumentInfo(inst);
-
-    const Xbyak::Xmm to = ctx.reg_alloc.ScratchXmm();
-    const size_t fbits = args[1].GetImmediateU8();
-    const FP::RoundingMode rounding_mode = static_cast<FP::RoundingMode>(args[2].GetImmediateU8());
-    ASSERT(rounding_mode == ctx.FPCR().RMode());
-
-    if (code.HasAVX512_Skylake()) {
-        const Xbyak::Reg64 from = ctx.reg_alloc.UseGpr(args[0]);
-        code.vcvtusi2sd(to, to, from.cvt32());
-    } else {
-        // We are using a 64-bit GPR register to ensure we don't end up treating the input as signed
-        const Xbyak::Reg64 from = ctx.reg_alloc.UseScratchGpr(args[0]);
-        code.mov(from.cvt32(), from.cvt32()); // TODO: Verify if this is necessary
-        code.cvtsi2sd(to, from);
-    }
-
-    if (fbits != 0) {
-        const u64 scale_factor = static_cast<u64>((1023 - fbits) << 52);
-        code.mulsd(to, code.MConst(xword, scale_factor));
-    }
-
-    ctx.reg_alloc.DefineValue(inst, to);
 }
 
 void EmitX64::EmitFPFixedU64ToDouble(EmitContext& ctx, IR::Inst* inst) {

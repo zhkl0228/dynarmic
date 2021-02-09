@@ -1,5 +1,6 @@
 add_library(dynarmic
     ../include/dynarmic/A32/a32.h
+    ../include/dynarmic/A32/arch_version.h
     ../include/dynarmic/A32/config.h
     ../include/dynarmic/A32/coprocessor.h
     ../include/dynarmic/A32/coprocessor_util.h
@@ -7,6 +8,7 @@ add_library(dynarmic
     ../include/dynarmic/A64/a64.h
     ../include/dynarmic/A64/config.h
     ../include/dynarmic/exclusive_monitor.h
+    ../include/dynarmic/optimization_flags.h
     common/assert.cpp
     common/assert.h
     common/bit_util.h
@@ -123,10 +125,12 @@ if ("A32" IN_LIST DYNARMIC_FRONTENDS)
         frontend/A32/location_descriptor.cpp
         frontend/A32/location_descriptor.h
         frontend/A32/PSR.h
+        frontend/A32/translate/conditional_state.cpp
+        frontend/A32/translate/conditional_state.h
         frontend/A32/translate/impl/asimd_load_store_structures.cpp
         frontend/A32/translate/impl/asimd_misc.cpp
         frontend/A32/translate/impl/asimd_one_reg_modified_immediate.cpp
-        frontend/A32/translate/impl/asimd_three_same.cpp
+        frontend/A32/translate/impl/asimd_three_regs.cpp
         frontend/A32/translate/impl/asimd_two_regs_misc.cpp
         frontend/A32/translate/impl/asimd_two_regs_scalar.cpp
         frontend/A32/translate/impl/asimd_two_regs_shift.cpp
@@ -150,6 +154,9 @@ if ("A32" IN_LIST DYNARMIC_FRONTENDS)
         frontend/A32/translate/impl/synchronization.cpp
         frontend/A32/translate/impl/thumb16.cpp
         frontend/A32/translate/impl/thumb32.cpp
+        frontend/A32/translate/impl/thumb32_misc.cpp
+        frontend/A32/translate/impl/thumb32_multiply.cpp
+        frontend/A32/translate/impl/thumb32_parallel.cpp
         frontend/A32/translate/impl/translate_arm.h
         frontend/A32/translate/impl/translate_thumb.h
         frontend/A32/translate/impl/vfp.cpp

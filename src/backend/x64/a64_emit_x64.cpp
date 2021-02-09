@@ -52,10 +52,6 @@ FP::FPCR A64EmitContext::FPCR(bool fpcr_controlled) const {
     return fpcr_controlled ? Location().FPCR() : Location().FPCR().ASIMDStandardValue();
 }
 
-bool A64EmitContext::AccurateNaN() const {
-    return conf.floating_point_nan_accuracy == A64::UserConfig::NaNAccuracy::Accurate;
-}
-
 A64EmitX64::A64EmitX64(BlockOfCode& code, A64::UserConfig conf, A64::Jit* jit_interface)
         : EmitX64(code), conf(conf), jit_interface{jit_interface} {
     GenMemory128Accessors();
@@ -144,7 +140,7 @@ void A64EmitX64::InvalidateCacheRanges(const boost::icl::interval_set<u64>& rang
 }
 
 void A64EmitX64::ClearFastDispatchTable() {
-    if (conf.enable_fast_dispatch) {
+    if (conf.HasOptimization(OptimizationFlag::FastDispatch)) {
         fast_dispatch_table.fill({});
     }
 }
@@ -323,7 +319,7 @@ void A64EmitX64::GenTerminalHandlers() {
     code.and_(eax, u32(A64JitState::RSBPtrMask));
     code.mov(dword[r15 + offsetof(A64JitState, rsb_ptr)], eax);
     code.cmp(rbx, qword[r15 + offsetof(A64JitState, rsb_location_descriptors) + rax * sizeof(u64)]);
-    if (conf.enable_fast_dispatch) {
+    if (conf.HasOptimization(OptimizationFlag::FastDispatch)) {
         code.jne(rsb_cache_miss);
     } else {
         code.jne(code.GetReturnFromRunCodeAddress());
@@ -332,7 +328,7 @@ void A64EmitX64::GenTerminalHandlers() {
     code.jmp(rax);
     PerfMapRegister(terminal_handler_pop_rsb_hint, code.getCurr(), "a64_terminal_handler_pop_rsb_hint");
 
-    if (conf.enable_fast_dispatch) {
+    if (conf.HasOptimization(OptimizationFlag::FastDispatch)) {
         code.align();
         terminal_handler_fast_dispatch_hint = code.getCurr<const void*>();
         calculate_location_descriptor();
@@ -366,7 +362,7 @@ void A64EmitX64::GenTerminalHandlers() {
 }
 
 void A64EmitX64::EmitPushRSB(EmitContext& ctx, IR::Inst* inst) {
-    if (!conf.enable_optimizations) {
+    if (!conf.HasOptimization(OptimizationFlag::ReturnStackBuffer)) {
         return;
     }
 
@@ -663,11 +659,13 @@ void A64EmitX64::EmitA64DataMemoryBarrier(A64EmitContext&, IR::Inst*) {
     code.lfence();
 }
 
-void A64EmitX64::EmitA64InstructionSynchronizationBarrier(A64EmitContext& ctx, IR::Inst* ) {
-    ctx.reg_alloc.HostCall(nullptr);
+void A64EmitX64::EmitA64InstructionSynchronizationBarrier(A64EmitContext& ctx, IR::Inst*) {
+    if (!conf.hook_isb) {
+        return;
+    }
 
-    code.mov(code.ABI_PARAM1, reinterpret_cast<u64>(jit_interface));
-    code.CallLambda([](A64::Jit* jit) { jit->ClearCache(); });
+    ctx.reg_alloc.HostCall(nullptr);
+    Devirtualize<&A64::UserCallbacks::InstructionSynchronizationBarrierRaised>(conf.callbacks).EmitCall(code);
 }
 
 void A64EmitX64::EmitA64GetCNTFRQ(A64EmitContext& ctx, IR::Inst* inst) {
@@ -790,25 +788,40 @@ Xbyak::RegExp EmitVAddrLookup(BlockOfCode& code, A64EmitContext& ctx, size_t bit
 
     EmitDetectMisaignedVAddr(code, ctx, bitsize, abort, vaddr, tmp);
 
-    code.mov(tmp, vaddr);
     if (unused_top_bits == 0) {
+        code.mov(tmp, vaddr);
         code.shr(tmp, int(page_bits));
     } else if (ctx.conf.silently_mirror_page_table) {
         if (valid_page_index_bits >= 32) {
-            code.shl(tmp, int(unused_top_bits));
-            code.shr(tmp, int(unused_top_bits + page_bits));
+            if (code.HasBMI2()) {
+                const Xbyak::Reg64 bit_count = ctx.reg_alloc.ScratchGpr();
+                code.mov(bit_count, unused_top_bits);
+                code.bzhi(tmp, vaddr, bit_count);
+                code.shr(tmp, int(page_bits));
+                ctx.reg_alloc.Release(bit_count);
+            } else {
+                code.mov(tmp, vaddr);
+                code.shl(tmp, int(unused_top_bits));
+                code.shr(tmp, int(unused_top_bits + page_bits));
+            }
         } else {
+            code.mov(tmp, vaddr);
             code.shr(tmp, int(page_bits));
             code.and_(tmp, u32((1 << valid_page_index_bits) - 1));
         }
     } else {
         ASSERT(valid_page_index_bits < 32);
+        code.mov(tmp, vaddr);
         code.shr(tmp, int(page_bits));
         code.test(tmp, u32(-(1 << valid_page_index_bits)));
         code.jnz(abort, code.T_NEAR);
     }
     code.mov(page, qword[r14 + tmp * sizeof(void*)]);
-    code.test(page, page);
+    if (ctx.conf.page_table_pointer_mask_bits == 0) {
+        code.test(page, page);
+    } else {
+        code.and_(page, ~u32(0) << ctx.conf.page_table_pointer_mask_bits);
+    }
     code.jz(abort, code.T_NEAR);
     if (ctx.conf.absolute_offset_page_table) {
         return page + vaddr;
@@ -1205,7 +1218,7 @@ void A64EmitX64::EmitTerminalImpl(IR::Term::ReturnToDispatch, IR::LocationDescri
 }
 
 void A64EmitX64::EmitTerminalImpl(IR::Term::LinkBlock terminal, IR::LocationDescriptor, bool is_single_step) {
-    if (!conf.enable_optimizations || is_single_step) {
+    if (!conf.HasOptimization(OptimizationFlag::BlockLinking) || is_single_step) {
         code.mov(rax, A64::LocationDescriptor{terminal.next}.PC());
         code.mov(qword[r15 + offsetof(A64JitState, pc)], rax);
         code.ReturnFromRunCode();
@@ -1226,7 +1239,7 @@ void A64EmitX64::EmitTerminalImpl(IR::Term::LinkBlock terminal, IR::LocationDesc
 }
 
 void A64EmitX64::EmitTerminalImpl(IR::Term::LinkBlockFast terminal, IR::LocationDescriptor, bool is_single_step) {
-    if (!conf.enable_optimizations || is_single_step) {
+    if (!conf.HasOptimization(OptimizationFlag::BlockLinking) || is_single_step) {
         code.mov(rax, A64::LocationDescriptor{terminal.next}.PC());
         code.mov(qword[r15 + offsetof(A64JitState, pc)], rax);
         code.ReturnFromRunCode();
@@ -1242,7 +1255,7 @@ void A64EmitX64::EmitTerminalImpl(IR::Term::LinkBlockFast terminal, IR::Location
 }
 
 void A64EmitX64::EmitTerminalImpl(IR::Term::PopRSBHint, IR::LocationDescriptor, bool is_single_step) {
-    if (!conf.enable_optimizations || is_single_step) {
+    if (!conf.HasOptimization(OptimizationFlag::ReturnStackBuffer) || is_single_step) {
         code.ReturnFromRunCode();
         return;
     }
@@ -1251,11 +1264,12 @@ void A64EmitX64::EmitTerminalImpl(IR::Term::PopRSBHint, IR::LocationDescriptor, 
 }
 
 void A64EmitX64::EmitTerminalImpl(IR::Term::FastDispatchHint, IR::LocationDescriptor, bool is_single_step) {
-    if (conf.enable_fast_dispatch && !is_single_step) {
-        code.jmp(terminal_handler_fast_dispatch_hint);
-    } else {
+    if (!conf.HasOptimization(OptimizationFlag::FastDispatch) || is_single_step) {
         code.ReturnFromRunCode();
+        return;
     }
+
+    code.jmp(terminal_handler_fast_dispatch_hint);
 }
 
 void A64EmitX64::EmitTerminalImpl(IR::Term::If terminal, IR::LocationDescriptor initial_location, bool is_single_step) {
@@ -1323,7 +1337,7 @@ void A64EmitX64::EmitPatchMovRcx(CodePtr target_code_ptr) {
 
 void A64EmitX64::Unpatch(const IR::LocationDescriptor& location) {
     EmitX64::Unpatch(location);
-    if (conf.enable_fast_dispatch) {
+    if (conf.HasOptimization(OptimizationFlag::FastDispatch)) {
         (*fast_dispatch_table_lookup)(location.Value()) = {};
     }
 }

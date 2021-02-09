@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <memory>
 
+#include <dynarmic/optimization_flags.h>
+
 namespace Dynarmic {
 class ExclusiveMonitor;
 } // namespace Dynarmic
@@ -108,6 +110,7 @@ struct UserCallbacks {
 
     virtual void ExceptionRaised(VAddr pc, Exception exception) = 0;
     virtual void DataCacheOperationRaised(DataCacheOperation /*op*/, VAddr /*value*/) {}
+    virtual void InstructionSynchronizationBarrierRaised() {}
 
     // Timing-related callbacks
     // ticks ticks have passed
@@ -124,19 +127,37 @@ struct UserConfig {
     size_t processor_id = 0;
     ExclusiveMonitor* global_monitor = nullptr;
 
-    /// When set to false, this disables all optimizations than can't otherwise be disabled
-    /// by setting other configuration options. This includes:
+    /// This selects other optimizations than can't otherwise be disabled by setting other
+    /// configuration options. This includes:
     /// - IR optimizations
     /// - Block linking optimizations
     /// - RSB optimizations
     /// This is intended to be used for debugging.
-    bool enable_optimizations = true;
+    OptimizationFlag optimizations = all_safe_optimizations;
+
+    bool HasOptimization(OptimizationFlag f) const {
+        if (!unsafe_optimizations) {
+            f &= all_safe_optimizations;
+        }
+        return (f & optimizations) != no_optimizations;
+    }
+
+    /// This enables unsafe optimizations that reduce emulation accuracy in favour of speed.
+    /// For safety, in order to enable unsafe optimizations you have to set BOTH this flag
+    /// AND the appropriate flag bits above.
+    /// The prefered and tested mode for this library is with unsafe optimizations disabled.
+    bool unsafe_optimizations = false;
 
     /// When set to true, UserCallbacks::DataCacheOperationRaised will be called when any
     /// data cache instruction is executed. Notably DC ZVA will not implicitly do anything.
     /// When set to false, UserCallbacks::DataCacheOperationRaised will never be called.
     /// Executing DC ZVA in this mode will result in zeros being written to memory.
     bool hook_data_cache_operations = false;
+
+    /// When set to true, UserCallbacks::InstructionSynchronizationBarrierRaised will be
+    /// called when an ISB instruction is executed.
+    /// When set to false, ISB will be treated as a NOP instruction.
+    bool hook_isb = false;
 
     /// When set to true, UserCallbacks::ExceptionRaised will be called when any hint
     /// instruction is executed.
@@ -173,6 +194,11 @@ struct UserConfig {
     /// Determines the size of page_table. Valid values are between 12 and 64 inclusive.
     /// This is only used if page_table is not nullptr.
     size_t page_table_address_space_bits = 36;
+    /// Masks out the first N bits in host pointers from the page table.
+    /// The intention behind this is to allow users of Dynarmic to pack attributes in the
+    /// same integer and update the pointer attribute pair atomically.
+    /// If the configured value is 3, all pointers will be forcefully aligned to 8 bytes.
+    int page_table_pointer_mask_bits = 0;
     /// Determines what happens if the guest accesses an entry that is off the end of the
     /// page table. If true, Dynarmic will silently mirror page_table's address space. If
     /// false, accessing memory outside of page_table bounds will result in a call to the
@@ -205,21 +231,6 @@ struct UserConfig {
     /// This tells the translator a wall clock will be used, thus allowing it
     /// to avoid writting certain unnecessary code only needed for cycle timers.
     bool wall_clock_cntpct = false;
-
-    /// This enables the fast dispatcher.
-    bool enable_fast_dispatch = true;
-
-    // The below options relate to accuracy of floating-point emulation.
-
-    /// Determines how accurate NaN handling is.
-    enum class NaNAccuracy {
-        /// Results of operations with NaNs will exactly match hardware.
-        Accurate,
-        /// Behave as if FPCR.DN is always set.
-        AlwaysForceDefaultNaN,
-        /// No special handling of NaN, other than setting default NaN when FPCR.DN is set.
-        NoChecks,
-    } floating_point_nan_accuracy = NaNAccuracy::Accurate;
 
     // Determines whether AddTicks and GetTicksRemaining are called.
     // If false, execution will continue until soon after Jit::HaltExecution is called.

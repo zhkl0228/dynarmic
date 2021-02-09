@@ -30,10 +30,19 @@ constexpr T Ones(size_t count) {
 }
 
 /// Extract bits [begin_bit, end_bit] inclusive from value of type T.
+template<typename T>
+constexpr T Bits(const size_t begin_bit, const size_t end_bit, const T value) {
+    ASSERT_MSG(begin_bit <= end_bit, "invalid bit range (position of beginning bit cannot be greater than that of end bit)");
+    ASSERT_MSG(begin_bit < BitSize<T>(), "begin_bit must be smaller than size of T");
+    ASSERT_MSG(end_bit < BitSize<T>(), "end_bit must be smaller than size of T");
+
+    return (value >> begin_bit) & Ones<T>(end_bit - begin_bit + 1);
+}
+
+/// Extract bits [begin_bit, end_bit] inclusive from value of type T.
 template<size_t begin_bit, size_t end_bit, typename T>
 constexpr T Bits(const T value) {
-    static_assert(begin_bit <= end_bit,
-                  "invalid bit range (position of beginning bit cannot be greater than that of end bit)");
+    static_assert(begin_bit <= end_bit, "invalid bit range (position of beginning bit cannot be greater than that of end bit)");
     static_assert(begin_bit < BitSize<T>(), "begin_bit must be smaller than size of T");
     static_assert(end_bit < BitSize<T>(), "end_bit must be smaller than size of T");
 
@@ -43,8 +52,7 @@ constexpr T Bits(const T value) {
 /// Create a mask of type T for bits [begin_bit, end_bit] inclusive.
 template<size_t begin_bit, size_t end_bit, typename T>
 constexpr T Mask() {
-    static_assert(begin_bit <= end_bit,
-                  "invalid bit range (position of beginning bit cannot be greater than that of end bit)");
+    static_assert(begin_bit <= end_bit, "invalid bit range (position of beginning bit cannot be greater than that of end bit)");
     static_assert(begin_bit < BitSize<T>(), "begin_bit must be smaller than size of T");
     static_assert(end_bit < BitSize<T>(), "end_bit must be smaller than size of T");
 
@@ -210,18 +218,23 @@ constexpr T RotateRight(T value, size_t amount) {
     return static_cast<T>((x >> amount) | (x << (BitSize<T>() - amount)));
 }
 
-constexpr u16 Swap16(u16 value) {
+constexpr u32 SwapHalves32(u32 value) {
+    return ((value & 0xFFFF0000U) >> 16) |
+           ((value & 0x0000FFFFU) << 16);
+}
+
+constexpr u16 SwapBytes16(u16 value) {
     return static_cast<u16>(u32{value} >> 8 | u32{value} << 8);
 }
 
-constexpr u32 Swap32(u32 value) {
+constexpr u32 SwapBytes32(u32 value) {
     return ((value & 0xFF000000U) >> 24) |
            ((value & 0x00FF0000U) >>  8) |
            ((value & 0x0000FF00U) <<  8) |
            ((value & 0x000000FFU) << 24);
 }
 
-constexpr u64 Swap64(u64 value) {
+constexpr u64 SwapBytes64(u64 value) {
     return  ((value & 0xFF00000000000000ULL) >> 56) |
             ((value & 0x00FF000000000000ULL) >> 40) |
             ((value & 0x0000FF0000000000ULL) >> 24) |

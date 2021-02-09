@@ -17,6 +17,16 @@ enum class Comparison {
     AbsoluteGT,
 };
 
+enum class AccumulateBehavior {
+    None,
+    Accumulate,
+};
+
+enum class WidenBehaviour {
+    Second,
+    Both,
+};
+
 template <bool WithDst, typename Callable>
 bool BitwiseInstruction(ArmTranslatorVisitor& v, bool D, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm, Callable fn) {
     if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
@@ -138,7 +148,106 @@ bool FloatComparison(ArmTranslatorVisitor& v, bool D, bool sz, size_t Vn, size_t
     v.ir.SetVector(d, result);
     return true;
 }
+
+bool AbsoluteDifference(ArmTranslatorVisitor& v, bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm,
+                        AccumulateBehavior accumulate) {
+    if (sz == 0b11) {
+        return v.UndefinedInstruction();
+    }
+
+    if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
+        return v.UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(Q, Vd, D);
+    const auto m = ToVector(Q, Vm, M);
+    const auto n = ToVector(Q, Vn, N);
+
+    const auto reg_m = v.ir.GetVector(m);
+    const auto reg_n = v.ir.GetVector(n);
+    const auto result = [&] {
+        const auto absdiff = U ? v.ir.VectorUnsignedAbsoluteDifference(esize, reg_n, reg_m)
+                               : v.ir.VectorSignedAbsoluteDifference(esize, reg_n, reg_m);
+
+        if (accumulate == AccumulateBehavior::Accumulate) {
+            const auto reg_d = v.ir.GetVector(d);
+            return v.ir.VectorAdd(esize, reg_d, absdiff);
+        }
+
+        return absdiff;
+    }();
+
+    v.ir.SetVector(d, result);
+    return true;
+}
+
+bool AbsoluteDifferenceLong(ArmTranslatorVisitor& v, bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool M, size_t Vm,
+                            AccumulateBehavior accumulate) {
+    if (sz == 0b11) {
+        return v.DecodeError();
+    }
+
+    if (Common::Bit<0>(Vd)) {
+        return v.UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(true, Vd, D);
+    const auto m = ToVector(false, Vm, M);
+    const auto n = ToVector(false, Vn, N);
+
+    const auto reg_m = v.ir.GetVector(m);
+    const auto reg_n = v.ir.GetVector(n);
+    const auto operand_m = v.ir.VectorZeroExtend(esize, v.ir.ZeroExtendToQuad(v.ir.VectorGetElement(64, reg_m, 0)));
+    const auto operand_n = v.ir.VectorZeroExtend(esize, v.ir.ZeroExtendToQuad(v.ir.VectorGetElement(64, reg_n, 0)));
+    const auto result = [&] {
+        const auto absdiff = U ? v.ir.VectorUnsignedAbsoluteDifference(esize, operand_m, operand_n)
+                               : v.ir.VectorSignedAbsoluteDifference(esize, operand_m, operand_n);
+
+        if (accumulate == AccumulateBehavior::Accumulate) {
+            const auto reg_d = v.ir.GetVector(d);
+            return v.ir.VectorAdd(2 * esize, reg_d, absdiff);
+        }
+
+        return absdiff;
+    }();
+
+    v.ir.SetVector(d, result);
+    return true;
+}
+
+template <typename Callable>
+bool WideInstruction(ArmTranslatorVisitor& v, bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool M, size_t Vm, WidenBehaviour widen_behaviour, Callable fn) {
+    const size_t esize = 8U << sz;
+    const bool widen_first = widen_behaviour == WidenBehaviour::Both;
+
+    if (sz == 0b11) {
+        return v.DecodeError();
+    }
+
+    if (Common::Bit<0>(Vd) || (!widen_first && Common::Bit<0>(Vn))) {
+        return v.UndefinedInstruction();
+    }
+
+    const auto d = ToVector(true, Vd, D);
+    const auto m = ToVector(false, Vm, M);
+    const auto n = ToVector(!widen_first, Vn, N);
+
+    const auto reg_d = v.ir.GetVector(d);
+    const auto reg_m = v.ir.GetVector(m);
+    const auto reg_n = v.ir.GetVector(n);
+    const auto wide_n = U ? v.ir.VectorZeroExtend(esize, reg_n) : v.ir.VectorSignExtend(esize, reg_n);
+    const auto wide_m = U ? v.ir.VectorZeroExtend(esize, reg_m) : v.ir.VectorSignExtend(esize, reg_m);
+    const auto result = fn(esize * 2, reg_d, widen_first ? wide_n : reg_n, wide_m);
+
+    v.ir.SetVector(d, result);
+    return true;
+}
+
 } // Anonymous namespace
+
+// ASIMD Three registers of the same length
 
 bool ArmTranslatorVisitor::asimd_VHADD(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
@@ -306,6 +415,14 @@ bool ArmTranslatorVisitor::asimd_VCGE_reg(bool U, bool D, size_t sz, size_t Vn, 
     return IntegerComparison(*this, U, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::GE);
 }
 
+bool ArmTranslatorVisitor::asimd_VABD(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return AbsoluteDifference(*this, U, D, sz, Vn, Vd, N, Q, M, Vm, AccumulateBehavior::None);
+}
+
+bool ArmTranslatorVisitor::asimd_VABA(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return AbsoluteDifference(*this, U, D, sz, Vn, Vd, N, Q, M, Vm, AccumulateBehavior::Accumulate);
+}
+
 bool ArmTranslatorVisitor::asimd_VADD_int(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
         return UndefinedInstruction();
@@ -318,7 +435,7 @@ bool ArmTranslatorVisitor::asimd_VADD_int(bool D, size_t sz, size_t Vn, size_t V
 
     const auto reg_m = ir.GetVector(m);
     const auto reg_n = ir.GetVector(n);
-    const auto result = ir.VectorAdd(esize, reg_m, reg_n);
+    const auto result = ir.VectorAdd(esize, reg_n, reg_m);
 
     ir.SetVector(d, result);
     return true;
@@ -417,11 +534,11 @@ bool ArmTranslatorVisitor::asimd_VMAX(bool U, bool D, size_t sz, size_t Vn, size
     const auto reg_n = ir.GetVector(n);
     const auto result = [&] {
         if (op) {
-            return U ? ir.VectorMinUnsigned(esize, reg_m, reg_n)
-                     : ir.VectorMinSigned(esize, reg_m, reg_n);
+            return U ? ir.VectorMinUnsigned(esize, reg_n, reg_m)
+                     : ir.VectorMinSigned(esize, reg_n, reg_m);
         } else {
-            return U ? ir.VectorMaxUnsigned(esize, reg_m, reg_n)
-                     : ir.VectorMaxSigned(esize, reg_m, reg_n);
+            return U ? ir.VectorMaxUnsigned(esize, reg_n, reg_m)
+                     : ir.VectorMaxSigned(esize, reg_n, reg_m);
         }
     }();
 
@@ -473,7 +590,7 @@ bool ArmTranslatorVisitor::asimd_VMLA(bool op, bool D, size_t sz, size_t Vn, siz
     const auto reg_n = ir.GetVector(n);
     const auto reg_m = ir.GetVector(m);
     const auto reg_d = ir.GetVector(d);
-    const auto multiply = ir.VectorMultiply(esize, reg_m, reg_n);
+    const auto multiply = ir.VectorMultiply(esize, reg_n, reg_m);
     const auto result = op ? ir.VectorSub(esize, reg_d, multiply)
                            : ir.VectorAdd(esize, reg_d, multiply);
 
@@ -497,8 +614,83 @@ bool ArmTranslatorVisitor::asimd_VMUL(bool P, bool D, size_t sz, size_t Vn, size
 
     const auto reg_n = ir.GetVector(n);
     const auto reg_m = ir.GetVector(m);
-    const auto result = P ? ir.VectorPolynomialMultiply(reg_m, reg_n)
-                          : ir.VectorMultiply(esize, reg_m, reg_n);
+    const auto result = P ? ir.VectorPolynomialMultiply(reg_n, reg_m)
+                          : ir.VectorMultiply(esize, reg_n, reg_m);
+
+    ir.SetVector(d, result);
+    return true;
+}
+
+bool ArmTranslatorVisitor::asimd_VPMAX_int(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, bool op, size_t Vm) {
+    if (sz == 0b11 || Q) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(false, Vd, D);
+    const auto m = ToVector(false, Vm, M);
+    const auto n = ToVector(false, Vn, N);
+
+    const auto reg_m = ir.GetVector(m);
+    const auto reg_n = ir.GetVector(n);
+
+    const auto bottom = ir.VectorDeinterleaveEvenLower(esize, reg_n, reg_m);
+    const auto top = ir.VectorDeinterleaveOddLower(esize, reg_n, reg_m);
+
+    const auto result = [&] {
+        if (op) {
+            return U ? ir.VectorMinUnsigned(esize, bottom, top)
+                     : ir.VectorMinSigned(esize, bottom, top);
+        } else {
+            return U ? ir.VectorMaxUnsigned(esize, bottom, top)
+                     : ir.VectorMaxSigned(esize, bottom, top);
+        }
+    }();
+
+    ir.SetVector(d, result);
+    return true;
+}
+
+bool ArmTranslatorVisitor::asimd_VQDMULH(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
+        return UndefinedInstruction();
+    }
+
+    if (sz == 0b00 || sz == 0b11) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(Q, Vd, D);
+    const auto m = ToVector(Q, Vm, M);
+    const auto n = ToVector(Q, Vn, N);
+
+    const auto reg_n = ir.GetVector(n);
+    const auto reg_m = ir.GetVector(m);
+    const auto result = ir.VectorSignedSaturatedDoublingMultiply(esize, reg_n, reg_m);
+
+    ir.SetVector(d, result.upper);
+    return true;
+}
+
+bool ArmTranslatorVisitor::asimd_VQRDMULH(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
+        return UndefinedInstruction();
+    }
+
+    if (sz == 0b00 || sz == 0b11) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(Q, Vd, D);
+    const auto m = ToVector(Q, Vm, M);
+    const auto n = ToVector(Q, Vn, N);
+
+    const auto reg_n = ir.GetVector(n);
+    const auto reg_m = ir.GetVector(m);
+    const auto multiply = ir.VectorSignedSaturatedDoublingMultiply(esize, reg_n, reg_m);
+    const auto result = ir.VectorAdd(esize, multiply.upper, ir.VectorLogicalShiftRight(esize, multiply.lower, static_cast<u8>(esize - 1)));
 
     ir.SetVector(d, result);
     return true;
@@ -522,6 +714,18 @@ bool ArmTranslatorVisitor::asimd_VPADD(bool D, size_t sz, size_t Vn, size_t Vd, 
     return true;
 }
 
+bool ArmTranslatorVisitor::asimd_VFMA(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto& reg_d, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorMulAdd(32, reg_d, reg_n, reg_m, false);
+    });
+}
+
+bool ArmTranslatorVisitor::asimd_VFMS(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto& reg_d, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorMulAdd(32, reg_d, ir.FPVectorNeg(32, reg_n), reg_m, false);
+    });
+}
+
 bool ArmTranslatorVisitor::asimd_VADD_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
         return ir.FPVectorAdd(32, reg_n, reg_m, false);
@@ -535,9 +739,11 @@ bool ArmTranslatorVisitor::asimd_VSUB_float(bool D, bool sz, size_t Vn, size_t V
 }
 
 bool ArmTranslatorVisitor::asimd_VPADD_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
-    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this, Q](const auto&, const auto& reg_n, const auto& reg_m) {
-        return Q ? ir.FPVectorPairedAdd(32, reg_n, reg_m, false)
-                 : ir.FPVectorPairedAddLower(32, reg_n, reg_m, false);
+    if (Q) {
+        return UndefinedInstruction();
+    }
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorPairedAddLower(32, reg_n, reg_m, false);
     });
 }
 
@@ -596,6 +802,28 @@ bool ArmTranslatorVisitor::asimd_VMIN_float(bool D, bool sz, size_t Vn, size_t V
     });
 }
 
+bool ArmTranslatorVisitor::asimd_VPMAX_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    if (Q) {
+        return UndefinedInstruction();
+    }
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        const auto bottom = ir.VectorDeinterleaveEvenLower(32, reg_n, reg_m);
+        const auto top = ir.VectorDeinterleaveOddLower(32, reg_n, reg_m);
+        return ir.FPVectorMax(32, bottom, top, false);
+    });
+}
+
+bool ArmTranslatorVisitor::asimd_VPMIN_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    if (Q) {
+        return UndefinedInstruction();
+    }
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        const auto bottom = ir.VectorDeinterleaveEvenLower(32, reg_n, reg_m);
+        const auto top = ir.VectorDeinterleaveOddLower(32, reg_n, reg_m);
+        return ir.FPVectorMin(32, bottom, top, false);
+    });
+}
+
 bool ArmTranslatorVisitor::asimd_VRECPS(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
         return ir.FPVectorRecipStepFused(32, reg_n, reg_m, false);
@@ -606,6 +834,63 @@ bool ArmTranslatorVisitor::asimd_VRSQRTS(bool D, bool sz, size_t Vn, size_t Vd, 
     return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
         return ir.FPVectorRSqrtStepFused(32, reg_n, reg_m, false);
     });
+}
+
+// ASIMD Three registers of different length
+
+bool ArmTranslatorVisitor::asimd_VADDL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool op, bool N, bool M, size_t Vm) {
+    return WideInstruction(*this, U, D, sz, Vn, Vd, N, M, Vm, op ? WidenBehaviour::Second : WidenBehaviour::Both, [this](size_t esize, const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.VectorAdd(esize, reg_n, reg_m);
+    });
+}
+
+bool ArmTranslatorVisitor::asimd_VSUBL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool op, bool N, bool M, size_t Vm) {
+    return WideInstruction(*this, U, D, sz, Vn, Vd, N, M, Vm, op ? WidenBehaviour::Second : WidenBehaviour::Both, [this](size_t esize, const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.VectorSub(esize, reg_n, reg_m);
+    });
+}
+
+bool ArmTranslatorVisitor::asimd_VABAL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool M, size_t Vm) {
+    return AbsoluteDifferenceLong(*this, U, D, sz, Vn, Vd, N, M, Vm, AccumulateBehavior::Accumulate);
+}
+
+bool ArmTranslatorVisitor::asimd_VABDL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool M, size_t Vm) {
+    return AbsoluteDifferenceLong(*this, U, D, sz, Vn, Vd, N, M, Vm, AccumulateBehavior::None);
+}
+
+bool ArmTranslatorVisitor::asimd_VMLAL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool op, bool N, bool M, size_t Vm) {
+    return WideInstruction(*this, U, D, sz, Vn, Vd, N, M, Vm, WidenBehaviour::Both, [this, op](size_t esize, const auto& reg_d, const auto& reg_n, const auto& reg_m) {
+        const auto multiply = ir.VectorMultiply(esize, reg_n, reg_m);
+        return op ? ir.VectorSub(esize, reg_d, multiply)
+                  : ir.VectorAdd(esize, reg_d, multiply);
+    });
+}
+
+bool ArmTranslatorVisitor::asimd_VMULL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool P, bool N, bool M, size_t Vm) {
+    if (sz == 0b11) {
+        return DecodeError();
+    }
+
+    if ((P & (U || sz == 0b10)) || Common::Bit<0>(Vd)) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = P ? (sz == 0b00 ? 8 : 64) : 8U << sz;
+    const auto d = ToVector(true, Vd, D);
+    const auto m = ToVector(false, Vm, M);
+    const auto n = ToVector(false, Vn, N);
+
+    const auto extend_reg = [&](const auto& reg) {
+        return U ? ir.VectorZeroExtend(esize, reg) : ir.VectorSignExtend(esize, reg);
+    };
+
+    const auto reg_n = ir.GetVector(n);
+    const auto reg_m = ir.GetVector(m);
+    const auto result = P ? ir.VectorPolynomialMultiplyLong(esize, reg_n, reg_m)
+                          : ir.VectorMultiply(2 * esize, extend_reg(reg_n), extend_reg(reg_m));
+
+    ir.SetVector(d, result);
+    return true;
 }
 
 } // namespace Dynarmic::A32

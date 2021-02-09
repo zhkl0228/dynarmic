@@ -155,8 +155,6 @@ void BlockOfCode::ForceReturnFromRunCode(bool mxcsr_already_exited) {
 }
 
 void BlockOfCode::GenRunCode(std::function<void(BlockOfCode&)> rcp) {
-    Xbyak::Label loop, enter_mxcsr_then_loop;
-
     align();
     run_code = getCurr<RunCodeFuncType>();
 
@@ -384,6 +382,21 @@ bool BlockOfCode::HasAVX512_Skylake() const {
         && DoesCpuSupport(Xbyak::util::Cpu::tAVX512BW)
         && DoesCpuSupport(Xbyak::util::Cpu::tAVX512DQ)
         && DoesCpuSupport(Xbyak::util::Cpu::tAVX512VL);
+}
+
+bool BlockOfCode::HasAVX512_Icelake() const {
+    return DoesCpuSupport(Xbyak::util::Cpu::tAVX512F)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512CD)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512BW)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512DQ)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512VL)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512_VPOPCNTDQ)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512_VNNI)
+        && DoesCpuSupport(Xbyak::util::Cpu::tGFNI)
+        && DoesCpuSupport(Xbyak::util::Cpu::tVAES)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512_VBMI2)
+        && DoesCpuSupport(Xbyak::util::Cpu::tAVX512_BITALG)
+        && DoesCpuSupport(Xbyak::util::Cpu::tVPCLMULQDQ);
 }
 
 bool BlockOfCode::HasAVX512_BITALG() const {
