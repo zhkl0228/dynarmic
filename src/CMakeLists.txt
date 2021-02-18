@@ -153,7 +153,10 @@ if ("A32" IN_LIST DYNARMIC_FRONTENDS)
         frontend/A32/translate/impl/status_register_access.cpp
         frontend/A32/translate/impl/synchronization.cpp
         frontend/A32/translate/impl/thumb16.cpp
-        frontend/A32/translate/impl/thumb32.cpp
+        frontend/A32/translate/impl/thumb32_branch.cpp
+        frontend/A32/translate/impl/thumb32_control.cpp
+        frontend/A32/translate/impl/thumb32_data_processing_register.cpp
+        frontend/A32/translate/impl/thumb32_data_processing_modified_immediate.cpp
         frontend/A32/translate/impl/thumb32_long_multiply.cpp
         frontend/A32/translate/impl/thumb32_misc.cpp
         frontend/A32/translate/impl/thumb32_multiply.cpp
@@ -233,6 +236,7 @@ if ("A64" IN_LIST DYNARMIC_FRONTENDS)
         frontend/A64/translate/impl/simd_two_register_misc.cpp
         frontend/A64/translate/impl/simd_vector_x_indexed_element.cpp
         frontend/A64/translate/impl/sys_dc.cpp
+        frontend/A64/translate/impl/sys_ic.cpp
         frontend/A64/translate/impl/system.cpp
         frontend/A64/translate/impl/system_flag_format.cpp
         frontend/A64/translate/impl/system_flag_manipulation.cpp

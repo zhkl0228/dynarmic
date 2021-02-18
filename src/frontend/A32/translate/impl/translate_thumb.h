@@ -24,6 +24,38 @@ struct ThumbTranslatorVisitor final {
         ASSERT_MSG(descriptor.TFlag(), "The processor must be in Thumb mode");
     }
 
+    struct ImmAndCarry {
+        u32 imm32;
+        IR::U1 carry;
+    };
+
+    ImmAndCarry ThumbExpandImm_C(Imm<1> i, Imm<3> imm3, Imm<8> imm8, IR::U1 carry_in) {
+        const Imm<12> imm12 = concatenate(i, imm3, imm8);
+        if (imm12.Bits<10, 11>() == 0) {
+            const u32 imm32 = [&]{
+                const u32 imm8 = imm12.Bits<0, 7>();
+                switch (imm12.Bits<8, 9>()) {
+                case 0b00:
+                    return imm8;
+                case 0b01:
+                    return Common::Replicate(imm8, 16);
+                case 0b10:
+                    return Common::Replicate(imm8 << 8, 16);
+                case 0b11:
+                    return Common::Replicate(imm8, 8);
+                }
+                UNREACHABLE();
+            }();
+            return {imm32, carry_in};
+        }
+        const u32 imm32 = Common::RotateRight<u32>((1 << 7) | imm12.Bits<0, 6>(), imm12.Bits<7, 11>());
+        return {imm32, ir.Imm1(Common::Bit<31>(imm32))};
+    }
+
+    u32 ThumbExpandImm(Imm<1> i, Imm<3> imm3, Imm<8> imm8) {
+        return ThumbExpandImm_C(i, imm3, imm8, ir.Imm1(0)).imm32;
+    }
+
     A32::IREmitter ir;
     ConditionalState cond_state = ConditionalState::None;
     TranslationOptions options;
@@ -116,10 +148,33 @@ struct ThumbTranslatorVisitor final {
     bool thumb16_B_t1(Cond cond, Imm<8> imm8);
     bool thumb16_B_t2(Imm<11> imm11);
 
-    // thumb32
-    bool thumb32_BL_imm(Imm<11> hi, Imm<11> lo);
-    bool thumb32_BLX_imm(Imm<11> hi, Imm<11> lo);
+    // thumb32 data processing (modified immediate) instructions
+    bool thumb32_TST_imm(Imm<1> i, Reg n, Imm<3> imm3, Imm<8> imm8);
+    bool thumb32_AND_imm(Imm<1> i, bool S, Reg n, Imm<3> imm3, Reg d, Imm<8> imm8);
+    bool thumb32_BIC_imm(Imm<1> i, bool S, Reg n, Imm<3> imm3, Reg d, Imm<8> imm8);
+    bool thumb32_MOV_imm(Imm<1> i, bool S, Imm<3> imm3, Reg d, Imm<8> imm8);
+    bool thumb32_ORR_imm(Imm<1> i, bool S, Reg n, Imm<3> imm3, Reg d, Imm<8> imm8);
+
+    // thumb32 miscellaneous control instructions
     bool thumb32_UDF();
+
+    // thumb32 branch instructions
+    bool thumb32_BL_imm(Imm<1> S, Imm<10> hi, Imm<1> j1, Imm<1> j2, Imm<11> lo);
+    bool thumb32_BLX_imm(Imm<1> S, Imm<10> hi, Imm<1> j1, Imm<1> j2, Imm<11> lo);
+
+    // thumb32 data processing (register) instructions
+    bool thumb32_SXTB(Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_SXTB16(Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_SXTAB(Reg n, Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_SXTAB16(Reg n, Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_SXTH(Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_SXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_UXTB(Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_UXTB16(Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_UXTAB(Reg n, Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_UXTAB16(Reg n, Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_UXTH(Reg d, SignExtendRotation rotate, Reg m);
+    bool thumb32_UXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m);
 
     // thumb32 long multiply, long multiply accumulate, and divide instructions
     bool thumb32_SDIV(Reg n, Reg d, Reg m);
