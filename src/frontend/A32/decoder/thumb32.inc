@@ -95,12 +95,12 @@ INST(thumb32_MOVT,           "MOVT",                     "11110i101100iiii0iiidd
 //INST(thumb32_MSR_reg_3,      "MSR (reg)",                "111100111000----10-0--1---0-----")
 //INST(thumb32_MSR_reg_4,      "MSR (reg)",                "111100111000----10-0--00--0-----")
 
-//INST(thumb32_NOP,            "NOP",                      "111100111010----10-0-00000000000")
-//INST(thumb32_YIELD,          "YIELD",                    "111100111010----10-0-00000000001")
-//INST(thumb32_WFE,            "WFE",                      "111100111010----10-0-00000000010")
-//INST(thumb32_WFI,            "WFI",                      "111100111010----10-0-00000000011")
-//INST(thumb32_SEV,            "SEV",                      "111100111010----10-0-00000000100")
-//INST(thumb32_SEVL,           "SEVL",                     "111100111010----10-0-00000000101")
+INST(thumb32_NOP,            "NOP",                      "11110011101011111000000000000000")
+INST(thumb32_YIELD,          "YIELD",                    "11110011101011111000000000000001")
+INST(thumb32_WFE,            "WFE",                      "11110011101011111000000000000010")
+INST(thumb32_WFI,            "WFI",                      "11110011101011111000000000000011")
+INST(thumb32_SEV,            "SEV",                      "11110011101011111000000000000100")
+INST(thumb32_SEVL,           "SEVL",                     "11110011101011111000000000000101")
 //INST(thumb32_DBG,            "DBG",                      "111100111010----10-0-0001111----")
 //INST(thumb32_CPS,            "CPS",                      "111100111010----10-0------------")
 
@@ -111,7 +111,7 @@ INST(thumb32_DSB,            "DSB",                      "1111001110111111100011
 INST(thumb32_DMB,            "DMB",                      "1111001110111111100011110101oooo")
 INST(thumb32_ISB,            "ISB",                      "1111001110111111100011110110oooo")
 
-//INST(thumb32_BXJ,            "BXJ",                      "111100111100----1000111100000000")
+INST(thumb32_BXJ,            "BXJ",                      "111100111100mmmm1000111100000000")
 //INST(thumb32_ERET,           "ERET",                     "11110011110111101000111100000000")
 //INST(thumb32_SUBS_pc_lr,     "SUBS PC, LR",              "111100111101111010001111--------")
 
@@ -189,10 +189,10 @@ INST(thumb32_BLX_imm,        "BLX (imm)",                "11110Svvvvvvvvvv11j0jv
 //INST(thumb32_LDR_imm12,      "LDR (imm12)",              "111110001101--------------------")
 
 // Data Processing (register)
-//INST(thumb32_LSL_reg,        "LSL (reg)",                "11111010000-----1111----0000----")
-//INST(thumb32_LSR_reg,        "LSR (reg)",                "11111010001-----1111----0000----")
-//INST(thumb32_ASR_reg,        "ASR (reg)",                "11111010010-----1111----0000----")
-//INST(thumb32_ROR_reg,        "ROR (reg)",                "11111010011-----1111----0000----")
+INST(thumb32_LSL_reg,        "LSL (reg)",                "111110100000mmmm1111dddd0000ssss")
+INST(thumb32_LSR_reg,        "LSR (reg)",                "111110100010mmmm1111dddd0000ssss")
+INST(thumb32_ASR_reg,        "ASR (reg)",                "111110100100mmmm1111dddd0000ssss")
+INST(thumb32_ROR_reg,        "ROR (reg)",                "111110100110mmmm1111dddd0000ssss")
 INST(thumb32_SXTH,           "SXTH",                     "11111010000011111111dddd10rrmmmm")
 INST(thumb32_SXTAH,          "SXTAH",                    "111110100000nnnn1111dddd10rrmmmm")
 INST(thumb32_UXTH,           "UXTH",                     "11111010000111111111dddd10rrmmmm")

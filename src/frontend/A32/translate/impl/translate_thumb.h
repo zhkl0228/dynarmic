@@ -164,17 +164,28 @@ struct ThumbTranslatorVisitor final {
     bool thumb32_MOVW_imm(Imm<1> imm1, Imm<4> imm4, Imm<3> imm3, Reg d, Imm<8> imm8);
 
     // thumb32 miscellaneous control instructions
+    bool thumb32_BXJ(Reg m);
     bool thumb32_CLREX();
     bool thumb32_DMB(Imm<4> option);
     bool thumb32_DSB(Imm<4> option);
     bool thumb32_ISB(Imm<4> option);
+    bool thumb32_NOP();
+    bool thumb32_SEV();
+    bool thumb32_SEVL();
     bool thumb32_UDF();
+    bool thumb32_WFE();
+    bool thumb32_WFI();
+    bool thumb32_YIELD();
 
     // thumb32 branch instructions
     bool thumb32_BL_imm(Imm<1> S, Imm<10> hi, Imm<1> j1, Imm<1> j2, Imm<11> lo);
     bool thumb32_BLX_imm(Imm<1> S, Imm<10> hi, Imm<1> j1, Imm<1> j2, Imm<11> lo);
 
     // thumb32 data processing (register) instructions
+    bool thumb32_ASR_reg(Reg m, Reg d, Reg s);
+    bool thumb32_LSL_reg(Reg m, Reg d, Reg s);
+    bool thumb32_LSR_reg(Reg m, Reg d, Reg s);
+    bool thumb32_ROR_reg(Reg m, Reg d, Reg s);
     bool thumb32_SXTB(Reg d, SignExtendRotation rotate, Reg m);
     bool thumb32_SXTB16(Reg d, SignExtendRotation rotate, Reg m);
     bool thumb32_SXTAB(Reg n, Reg d, SignExtendRotation rotate, Reg m);
