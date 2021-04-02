@@ -13,6 +13,7 @@
 #include "backend/x64/block_of_code.h"
 #include "backend/x64/perf_map.h"
 #include "common/assert.h"
+#include "common/bit_util.h"
 
 #ifdef _WIN32
     #include <windows.h>
@@ -43,8 +44,8 @@ const std::array<Xbyak::Reg64, 6> BlockOfCode::ABI_PARAMS = {BlockOfCode::ABI_PA
 
 namespace {
 
-constexpr size_t TOTAL_CODE_SIZE = 128 * 1024 * 1024;
-constexpr size_t FAR_CODE_OFFSET = 100 * 1024 * 1024;
+constexpr size_t TOTAL_CODE_SIZE = 256 * 1024 * 1024;
+constexpr size_t FAR_CODE_OFFSET = 200 * 1024 * 1024;
 constexpr size_t CONSTANT_POOL_SIZE = 2 * 1024 * 1024;
 
 class CustomXbyakAllocator : public Xbyak::Allocator {
@@ -364,7 +365,21 @@ bool BlockOfCode::HasBMI2() const {
 }
 
 bool BlockOfCode::HasFastBMI2() const {
-    return DoesCpuSupport(Xbyak::util::Cpu::tBMI2) && !DoesCpuSupport(Xbyak::util::Cpu::tAMD);
+    if (DoesCpuSupport(Xbyak::util::Cpu::tBMI2)) {
+        // BMI2 instructions such as pdep and pext have been very slow up until Zen 3.
+        // Check for Zen 3 or newer by its family (0x19).
+        // See also: https://en.wikichip.org/wiki/amd/cpuid
+        if (DoesCpuSupport(Xbyak::util::Cpu::tAMD)) {
+            std::array<u32, 4> data{};
+            cpu_info.getCpuid(1, data.data());
+            const u32 family_base     = Common::Bits< 8, 11>(data[0]);
+            const u32 family_extended = Common::Bits<20, 27>(data[0]);
+            const u32 family = family_base + family_extended;
+            return family >= 0x19;
+        }
+        return true;
+    }
+    return false;
 }
 
 bool BlockOfCode::HasFMA() const {
