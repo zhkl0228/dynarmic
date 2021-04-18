@@ -325,6 +325,7 @@ struct ThumbTranslatorVisitor final : public A32TranslatorVisitor {
     bool thumb32_SDIV(Reg n, Reg d, Reg m);
     bool thumb32_UMULL(Reg n, Reg dLo, Reg dHi, Reg m);
     bool thumb32_UDIV(Reg n, Reg d, Reg m);
+    bool thumb32_SMLAXY(Reg n, Reg a, Reg d, bool N, bool M, Reg m);
     bool thumb32_SMLAL(Reg n, Reg dLo, Reg dHi, Reg m);
     bool thumb32_UMLAL(Reg n, Reg dLo, Reg dHi, Reg m);
     bool thumb32_UMAAL(Reg n, Reg dLo, Reg dHi, Reg m);
@@ -351,6 +352,14 @@ struct ThumbTranslatorVisitor final : public A32TranslatorVisitor {
     // Advanced SIMD load/store structures
     bool v8_VST_multiple(bool D, Reg n, size_t Vd, Imm<4> type, size_t size, size_t align, Reg m);
     bool v8_VLD_multiple(bool D, Reg n, size_t Vd, Imm<4> type, size_t sz, size_t align, Reg m);
+    bool v8_VLD_all_lanes(bool D, Reg n, size_t Vd, size_t nn, size_t sz, bool T, bool a, Reg m);
+    bool v8_VLD_single(bool D, Reg n, size_t Vd, size_t sz, size_t nn, size_t index_align, Reg m);
+
+    // Advanced SIMD three registers with different lengths
+    bool asimd_VMULL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool P, bool N, bool M, size_t Vm);
+
+    // Advanced SIMD three register with same length
+    bool asimd_VADD_int(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm);
 
     // Floating-point three-register data processing instructions
     bool vfp_VMLA(bool D, size_t Vn, size_t Vd, bool sz, bool N, bool M, size_t Vm);

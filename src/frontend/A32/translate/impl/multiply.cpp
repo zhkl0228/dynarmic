@@ -299,6 +299,25 @@ bool ArmTranslatorVisitor::arm_UMULL(Cond cond, bool S, Reg dHi, Reg dLo, Reg m,
     return true;
 }
 
+bool ThumbTranslatorVisitor::thumb32_SMLAXY(Reg n, Reg a, Reg d, bool N, bool M, Reg m) {
+    if (d == Reg::PC || n == Reg::PC || m == Reg::PC || a == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+
+    const IR::U32 n32 = ir.GetRegister(n);
+    const IR::U32 m32 = ir.GetRegister(m);
+    const IR::U32 n16 = N ? ir.ArithmeticShiftRight(n32, ir.Imm8(16), ir.Imm1(0)).result
+                          : ir.SignExtendHalfToWord(ir.LeastSignificantHalf(n32));
+    const IR::U32 m16 = M ? ir.ArithmeticShiftRight(m32, ir.Imm8(16), ir.Imm1(0)).result
+                          : ir.SignExtendHalfToWord(ir.LeastSignificantHalf(m32));
+    const IR::U32 product = ir.Mul(n16, m16);
+    const auto result_overflow = ir.AddWithCarry(product, ir.GetRegister(a), ir.Imm1(0));
+
+    ir.SetRegister(d, result_overflow.result);
+    ir.OrQFlag(result_overflow.overflow);
+    return true;
+}
+
 // SMLAL<x><y><c> <RdLo>, <RdHi>, <Rn>, <Rm>
 bool ArmTranslatorVisitor::arm_SMLALxy(Cond cond, Reg dHi, Reg dLo, Reg m, bool M, bool N, Reg n) {
     if (dLo == Reg::PC || dHi == Reg::PC || n == Reg::PC || m == Reg::PC) {

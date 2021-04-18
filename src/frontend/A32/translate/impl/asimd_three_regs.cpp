@@ -448,6 +448,24 @@ bool ArmTranslatorVisitor::asimd_VADD_int(bool D, size_t sz, size_t Vn, size_t V
     return true;
 }
 
+bool ThumbTranslatorVisitor::asimd_VADD_int(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(Q, Vd, D);
+    const auto m = ToVector(Q, Vm, M);
+    const auto n = ToVector(Q, Vn, N);
+
+    const auto reg_m = ir.GetVector(m);
+    const auto reg_n = ir.GetVector(n);
+    const auto result = ir.VectorAdd(esize, reg_n, reg_m);
+
+    ir.SetVector(d, result);
+    return true;
+}
+
 bool ArmTranslatorVisitor::asimd_VSUB_int(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
         return UndefinedInstruction();
@@ -874,6 +892,33 @@ bool ArmTranslatorVisitor::asimd_VMLAL(bool U, bool D, size_t sz, size_t Vn, siz
 }
 
 bool ArmTranslatorVisitor::asimd_VMULL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool P, bool N, bool M, size_t Vm) {
+    if (sz == 0b11) {
+        return DecodeError();
+    }
+
+    if ((P & (U || sz == 0b10)) || Common::Bit<0>(Vd)) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = P ? (sz == 0b00 ? 8 : 64) : 8U << sz;
+    const auto d = ToVector(true, Vd, D);
+    const auto m = ToVector(false, Vm, M);
+    const auto n = ToVector(false, Vn, N);
+
+    const auto extend_reg = [&](const auto& reg) {
+        return U ? ir.VectorZeroExtend(esize, reg) : ir.VectorSignExtend(esize, reg);
+    };
+
+    const auto reg_n = ir.GetVector(n);
+    const auto reg_m = ir.GetVector(m);
+    const auto result = P ? ir.VectorPolynomialMultiplyLong(esize, reg_n, reg_m)
+                          : ir.VectorMultiply(2 * esize, extend_reg(reg_n), extend_reg(reg_m));
+
+    ir.SetVector(d, result);
+    return true;
+}
+
+bool ThumbTranslatorVisitor::asimd_VMULL(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool P, bool N, bool M, size_t Vm) {
     if (sz == 0b11) {
         return DecodeError();
     }

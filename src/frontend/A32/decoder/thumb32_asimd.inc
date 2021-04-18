@@ -21,7 +21,7 @@ INST(asimd_VAND_reg,        "VAND (register)",          "111011110D00nnnndddd000
 //INST(asimd_VMAX,            "VMAX/VMIN (integer)",      "1111001U0Dzznnnnmmmm0110NQMommmm") // ASIMD
 //INST(asimd_VABD,            "VABD",                     "1111001U0Dzznnnndddd0111NQM0mmmm") // ASIMD
 //INST(asimd_VABA,            "VABA",                     "1111001U0Dzznnnndddd0111NQM1mmmm") // ASIMD
-//INST(asimd_VADD_int,        "VADD (integer)",           "111100100Dzznnnndddd1000NQM0mmmm") // ASIMD
+INST(asimd_VADD_int,        "VADD (integer)",           "111011110Dzznnnndddd1000NQM0mmmm") // ASIMD
 //INST(asimd_VSUB_int,        "VSUB (integer)",           "111100110Dzznnnndddd1000NQM0mmmm") // ASIMD
 //INST(asimd_VTST,            "VTST",                     "111100100Dzznnnndddd1000NQM1mmmm") // ASIMD
 //INST(asimd_VCEQ_reg,        "VCEG (register)",          "111100110Dzznnnndddd1000NQM1mmmm") // ASIMD
@@ -62,7 +62,7 @@ INST(asimd_VAND_reg,        "VAND (register)",          "111011110D00nnnndddd000
 //INST(asimd_VABDL,           "VABDL",                    "1111001U1Dzznnnndddd0111N0M0mmmm") // ASIMD
 //INST(asimd_VMLAL,           "VMLAL/VMLSL",              "1111001U1Dzznnnndddd10o0N0M0mmmm") // ASIMD
 //INST(asimd_VQDMLAL,         "VQDMLAL",                  "111100101-----------10-1-0-0----") // ASIMD
-//INST(asimd_VMULL,           "VMULL",                    "1111001U1Dzznnnndddd11P0N0M0mmmm") // ASIMD
+INST(asimd_VMULL,           "VMULL",                    "111U11111Dzznnnndddd11P0N0M0mmmm") // ASIMD
 //INST(asimd_VQDMULL,         "VQDMULL",                  "111100101-----------1101-0-0----") // ASIMD
 
 // Two registers and a scalar
@@ -162,6 +162,6 @@ INST(v8_VLD_multiple,       "VLD{1-4} (multiple)",      "111110010D10nnnnddddxxx
 //INST(thumb32_UDF,           "UNALLOCATED",              "111101000--0--------1011--------") // v8
 //INST(thumb32_UDF,           "UNALLOCATED",              "111101000--0--------11----------") // v8
 //INST(thumb32_UDF,           "UNALLOCATED",              "111101001-00--------11----------") // v8
-//INST(v8_VLD_all_lanes,      "VLD{1-4} (all lanes)",     "111101001D10nnnndddd11nnzzTammmm") // v8
+INST(v8_VLD_all_lanes,      "VLD{1-4} (all lanes)",     "111110011D10nnnndddd11nnzzTammmm") // v8
 //INST(v8_VST_single,         "VST{1-4} (single)",        "111101001D00nnnnddddzzNNaaaammmm") // v8
-//INST(v8_VLD_single,         "VLD{1-4} (single)",        "111101001D10nnnnddddzzNNaaaammmm") // v8
+INST(v8_VLD_single,         "VLD{1-4} (single)",        "111110011D10nnnnddddzzNNaaaammmm") // v8
