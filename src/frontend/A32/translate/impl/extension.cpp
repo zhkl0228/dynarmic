@@ -69,6 +69,27 @@ bool ArmTranslatorVisitor::arm_SXTAH(Cond cond, Reg n, Reg d, SignExtendRotation
     return true;
 }
 
+// SXTAH<c> <Rd>, <Rn>, <Rm>{, <rotation>}
+bool ThumbTranslatorVisitor::thumb32_SXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
+    if (d == Reg::PC || d == Reg::R13 || n == Reg::R13 || m == Reg::PC || m == Reg::R13) {
+        return UnpredictableInstruction();
+    }
+    if(n == Reg::PC) {
+        return DecodeError();
+    }
+
+    if (!ConditionPassed()) {
+        return true;
+    }
+
+    const auto rotated = Rotate(ir, m, rotate);
+    const auto reg_n = ir.GetRegister(n);
+    const auto result = ir.Add(reg_n, ir.SignExtendHalfToWord(ir.LeastSignificantHalf(rotated)));
+
+    ir.SetRegister(d, result);
+    return true;
+}
+
 // SXTB<c> <Rd>, <Rm>{, <rotation>}
 bool ArmTranslatorVisitor::arm_SXTB(Cond cond, Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {

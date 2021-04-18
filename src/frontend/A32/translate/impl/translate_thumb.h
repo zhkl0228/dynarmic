@@ -333,6 +333,9 @@ struct ThumbTranslatorVisitor final : public A32TranslatorVisitor {
     // Coprocessor
     bool thumb32_MRC(size_t opc1, CoprocReg CRn, Reg t, size_t coproc, size_t opc2, CoprocReg CRm);
 
+    // Synchronization Primitive instructions
+    bool thumb32_CLREX();
+
     // Branch instructions
     bool thumb32_BL_imm(bool S, Imm<10> hi, bool j1, bool j2, Imm<11> lo);
     bool thumb32_BLX_imm(bool S, Imm<10> hi, bool j1, bool j2, Imm<11> lo);
@@ -360,6 +363,10 @@ struct ThumbTranslatorVisitor final : public A32TranslatorVisitor {
 
     // Advanced SIMD three register with same length
     bool asimd_VADD_int(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm);
+
+    // Advanced SIMD miscellaneous
+    bool asimd_VEXT(bool D, size_t Vn, size_t Vd, Imm<4> imm4, bool N, bool Q, bool M, size_t Vm);
+    bool asimd_VDUP_scalar(bool D, Imm<4> imm4, size_t Vd, bool Q, bool M, size_t Vm);
 
     // Floating-point three-register data processing instructions
     bool vfp_VMLA(bool D, size_t Vn, size_t Vd, bool sz, bool N, bool M, size_t Vm);
@@ -389,12 +396,15 @@ struct ThumbTranslatorVisitor final : public A32TranslatorVisitor {
     bool vfp_VMOV_f32_u32(size_t Vn, Reg t, bool N);
     bool vfp_VMOV_2u32_f64(Reg t2, Reg t1, bool M, size_t Vm);
     bool vfp_VMOV_f64_2u32(Reg t2, Reg t1, bool M, size_t Vm);
+    bool vfp_VMOV_from_i32(Imm<1> i, size_t Vd, Reg t, bool D);
+    bool vfp_VMOV_to_i32(Imm<1> i, size_t Vn, Reg t, bool N);
     bool vfp_VDUP(Imm<1> B, bool Q, size_t Vd, Reg t, bool D, Imm<1> E);
 
     // Floating-point system register access
     bool vfp_VMRS(Reg t);
 
     // Extension register load-store instructions
+    bool thumb32_SXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m);
     bool vfp_VPUSH(bool D, size_t Vd, bool sz, Imm<8> imm8);
     bool vfp_VPOP(bool D, size_t Vd, bool sz, Imm<8> imm8);
     bool vfp_VLDR(bool U, bool D, Reg n, size_t Vd, bool sz, Imm<8> imm8);

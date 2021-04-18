@@ -105,7 +105,7 @@ INST(thumb32_UBFX,           "UBFX",                     "111100111100nnnn0vvvdd
 
 //INST(thumb32_ENTERX,         "ENTERX",                   "111100111011----10-0----0001----")
 //INST(thumb32_LEAVEX,         "LEAVEX",                   "111100111011----10-0----0000----")
-//INST(thumb32_CLREX,          "CLREX",                    "111100111011----10-0----0010----")
+INST(thumb32_CLREX,          "CLREX",                    "11110011101111111000111100101111")
 INST(thumb32_DSB,            "DSB",                      "1111001110111111100011110100oooo")
 INST(thumb32_DMB,            "DMB",                      "1111001110111111100011110101oooo")
 //INST(thumb32_ISB,            "ISB",                      "1111001110111111100011110110oooo")
@@ -190,7 +190,7 @@ INST(thumb32_LSR_reg,        "LSR (reg)",                "11111010001Snnnn1111dd
 INST(thumb32_ASR_reg,        "ASR (reg)",                "11111010010Snnnn1111dddd0000mmmm")
 INST(thumb32_ROR_reg,        "ROR (reg)",                "11111010011Snnnn1111dddd0000mmmm")
 INST(thumb32_SXTH,           "SXTH",                     "11111010000011111111dddd10rrmmmm")
-//INST(thumb32_SXTAH,          "SXTAH",                    "111110100000----1111----1-------")
+INST(thumb32_SXTAH,          "SXTAH",                    "111110100000nnnn1111dddd10rrmmmm")
 INST(thumb32_UXTH,           "UXTH",                     "11111010000111111111dddd10rrmmmm")
 INST(thumb32_UXTAH,          "UXTAH",                    "111110100001nnnn1111dddd10rrmmmm")
 //INST(thumb32_SXTB16,         "SXTB16",                   "11111010001011111111----1-------")

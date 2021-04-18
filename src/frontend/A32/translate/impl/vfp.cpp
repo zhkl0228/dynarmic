@@ -772,6 +772,27 @@ bool ArmTranslatorVisitor::vfp_VMOV_from_i32(Cond cond, Imm<1> i, size_t Vd, Reg
     return true;
 }
 
+// VMOV<c>.32 <Dn[x]>, <Rt>
+bool ThumbTranslatorVisitor::vfp_VMOV_from_i32(Imm<1> i, size_t Vd, Reg t, bool D) {
+    if (!ConditionPassed()) {
+        return true;
+    }
+
+    if (t == Reg::R15 || t == Reg::R13) {
+        return UnpredictableInstruction();
+    }
+
+    const size_t index = i.ZeroExtend();
+    const auto d = ToVector(false, Vd, D);
+
+    const auto reg_d = ir.GetVector(d);
+    const auto scalar = ir.GetRegister(t);
+    const auto result = ir.VectorSetElement(32, reg_d, index, scalar);
+
+    ir.SetVector(d, result);
+    return true;
+}
+
 // VMOV<c>.16 <Dn[x]>, <Rt>
 bool ArmTranslatorVisitor::vfp_VMOV_from_i16(Cond cond, Imm<1> i1, size_t Vd, Reg t, bool D, Imm<1> i2) {
     if (!ConditionPassed(cond)) {
@@ -824,6 +845,26 @@ bool ArmTranslatorVisitor::vfp_VMOV_to_i32(Cond cond, Imm<1> i, size_t Vn, Reg t
 
     if (t == Reg::R15) {
         // TODO: v8 removes UPREDICTABLE for R13
+        return UnpredictableInstruction();
+    }
+
+    const size_t index = i.ZeroExtend();
+    const auto n = ToVector(false, Vn, N);
+
+    const auto reg_n = ir.GetVector(n);
+    const auto result = ir.VectorGetElement(32, reg_n, index);
+
+    ir.SetRegister(t, result);
+    return true;
+}
+
+// VMOV<c>.32 <Rt>, <Dn[x]>
+bool ThumbTranslatorVisitor::vfp_VMOV_to_i32(Imm<1> i, size_t Vn, Reg t, bool N) {
+    if (!ConditionPassed()) {
+        return true;
+    }
+
+    if (t == Reg::R15 || t == Reg::R13) {
         return UnpredictableInstruction();
     }
 

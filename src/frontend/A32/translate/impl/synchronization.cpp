@@ -14,6 +14,12 @@ bool ArmTranslatorVisitor::arm_CLREX() {
     return true;
 }
 
+// CLREX
+bool ThumbTranslatorVisitor::thumb32_CLREX() {
+    ir.ClearExclusive();
+    return true;
+}
+
 // SWP<c> <Rt>, <Rt2>, [<Rn>]
 // TODO: UNDEFINED if current mode is Hypervisor
 bool ArmTranslatorVisitor::arm_SWP(Cond cond, Reg n, Reg t, Reg t2) {
