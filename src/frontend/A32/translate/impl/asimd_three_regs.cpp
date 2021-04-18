@@ -55,7 +55,7 @@ bool BitwiseInstruction(A32TranslatorVisitor& v, bool D, size_t Vn, size_t Vd, b
 }
 
 template <typename Callable>
-bool FloatingPointInstruction(ArmTranslatorVisitor& v, bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm, Callable fn) {
+bool FloatingPointInstruction(A32TranslatorVisitor& v, bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm, Callable fn) {
     if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
         return v.UndefinedInstruction();
     }
@@ -77,7 +77,7 @@ bool FloatingPointInstruction(ArmTranslatorVisitor& v, bool D, bool sz, size_t V
     return true;
 }
 
-bool IntegerComparison(ArmTranslatorVisitor& v, bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm,
+bool IntegerComparison(A32TranslatorVisitor& v, bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm,
                        Comparison comparison) {
     if (sz == 0b11) {
         return v.UndefinedInstruction();
@@ -113,7 +113,7 @@ bool IntegerComparison(ArmTranslatorVisitor& v, bool U, bool D, size_t sz, size_
     return true;
 }
 
-bool FloatComparison(ArmTranslatorVisitor& v, bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm,
+bool FloatComparison(A32TranslatorVisitor& v, bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm,
                      Comparison comparison) {
     if (sz) {
         return v.UndefinedInstruction();
@@ -340,6 +340,12 @@ bool ArmTranslatorVisitor::asimd_VORR_reg(bool D, size_t Vn, size_t Vd, bool N, 
     });
 }
 
+bool ThumbTranslatorVisitor::asimd_VORR_reg(bool D, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return BitwiseInstruction<false>(*this, D, Vn, Vd, N, Q, M, Vm, [this](const auto& reg_n, const auto& reg_m) {
+        return ir.VectorOr(reg_n, reg_m);
+    });
+}
+
 bool ArmTranslatorVisitor::asimd_VORN_reg(bool D, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return BitwiseInstruction<false>(*this, D, Vn, Vd, N, Q, M, Vm, [this](const auto& reg_n, const auto& reg_m) {
         return ir.VectorOr(reg_n, ir.VectorNot(reg_m));
@@ -347,6 +353,12 @@ bool ArmTranslatorVisitor::asimd_VORN_reg(bool D, size_t Vn, size_t Vd, bool N, 
 }
 
 bool ArmTranslatorVisitor::asimd_VEOR_reg(bool D, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return BitwiseInstruction<false>(*this, D, Vn, Vd, N, Q, M, Vm, [this](const auto& reg_n, const auto& reg_m) {
+        return ir.VectorEor(reg_n, reg_m);
+    });
+}
+
+bool ThumbTranslatorVisitor::asimd_VEOR_reg(bool D, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return BitwiseInstruction<false>(*this, D, Vn, Vd, N, Q, M, Vm, [this](const auto& reg_n, const auto& reg_m) {
         return ir.VectorEor(reg_n, reg_m);
     });
@@ -418,6 +430,10 @@ bool ArmTranslatorVisitor::asimd_VCGT_reg(bool U, bool D, size_t sz, size_t Vn, 
     return IntegerComparison(*this, U, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::GT);
 }
 
+bool ThumbTranslatorVisitor::asimd_VCGT_reg(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return IntegerComparison(*this, U, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::GT);
+}
+
 bool ArmTranslatorVisitor::asimd_VCGE_reg(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return IntegerComparison(*this, U, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::GE);
 }
@@ -467,6 +483,24 @@ bool ThumbTranslatorVisitor::asimd_VADD_int(bool D, size_t sz, size_t Vn, size_t
 }
 
 bool ArmTranslatorVisitor::asimd_VSUB_int(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(Q, Vd, D);
+    const auto m = ToVector(Q, Vm, M);
+    const auto n = ToVector(Q, Vn, N);
+
+    const auto reg_m = ir.GetVector(m);
+    const auto reg_n = ir.GetVector(n);
+    const auto result = ir.VectorSub(esize, reg_n, reg_m);
+
+    ir.SetVector(d, result);
+    return true;
+}
+
+bool ThumbTranslatorVisitor::asimd_VSUB_int(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
         return UndefinedInstruction();
     }
@@ -571,6 +605,36 @@ bool ArmTranslatorVisitor::asimd_VMAX(bool U, bool D, size_t sz, size_t Vn, size
     return true;
 }
 
+bool ThumbTranslatorVisitor::asimd_VMAX(bool U, bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, bool op, size_t Vm) {
+    if (sz == 0b11) {
+        return UndefinedInstruction();
+    }
+
+    if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
+        return UndefinedInstruction();
+    }
+
+    const size_t esize = 8U << sz;
+    const auto d = ToVector(Q, Vd, D);
+    const auto m = ToVector(Q, Vm, M);
+    const auto n = ToVector(Q, Vn, N);
+
+    const auto reg_m = ir.GetVector(m);
+    const auto reg_n = ir.GetVector(n);
+    const auto result = [&] {
+        if (op) {
+            return U ? ir.VectorMinUnsigned(esize, reg_n, reg_m)
+                     : ir.VectorMinSigned(esize, reg_n, reg_m);
+        } else {
+            return U ? ir.VectorMaxUnsigned(esize, reg_n, reg_m)
+                     : ir.VectorMaxSigned(esize, reg_n, reg_m);
+        }
+    }();
+
+    ir.SetVector(d, result);
+    return true;
+}
+
 bool ArmTranslatorVisitor::asimd_VTST(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     if (Q && (Common::Bit<0>(Vd) || Common::Bit<0>(Vn) || Common::Bit<0>(Vm))) {
         return UndefinedInstruction();
@@ -595,6 +659,10 @@ bool ArmTranslatorVisitor::asimd_VTST(bool D, size_t sz, size_t Vn, size_t Vd, b
 }
 
 bool ArmTranslatorVisitor::asimd_VCEQ_reg(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return IntegerComparison(*this, false, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::EQ);
+}
+
+bool ThumbTranslatorVisitor::asimd_VCEQ_reg(bool D, size_t sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return IntegerComparison(*this, false, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::EQ);
 }
 
@@ -757,7 +825,19 @@ bool ArmTranslatorVisitor::asimd_VADD_float(bool D, bool sz, size_t Vn, size_t V
     });
 }
 
+bool ThumbTranslatorVisitor::asimd_VADD_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorAdd(32, reg_n, reg_m, false);
+    });
+}
+
 bool ArmTranslatorVisitor::asimd_VSUB_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorSub(32, reg_n, reg_m, false);
+    });
+}
+
+bool ThumbTranslatorVisitor::asimd_VSUB_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
         return ir.FPVectorSub(32, reg_n, reg_m, false);
     });
@@ -798,7 +878,17 @@ bool ArmTranslatorVisitor::asimd_VMUL_float(bool D, bool sz, size_t Vn, size_t V
     });
 }
 
+bool ThumbTranslatorVisitor::asimd_VMUL_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorMul(32, reg_n, reg_m, false);
+    });
+}
+
 bool ArmTranslatorVisitor::asimd_VCEQ_reg_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatComparison(*this, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::EQ);
+}
+
+bool ThumbTranslatorVisitor::asimd_VCEQ_reg_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return FloatComparison(*this, D, sz, Vn, Vd, N, Q, M, Vm, Comparison::EQ);
 }
 
@@ -816,6 +906,12 @@ bool ArmTranslatorVisitor::asimd_VACGE(bool D, bool op, bool sz, size_t Vn, size
 }
 
 bool ArmTranslatorVisitor::asimd_VMAX_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
+    return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
+        return ir.FPVectorMax(32, reg_n, reg_m, false);
+    });
+}
+
+bool ThumbTranslatorVisitor::asimd_VMAX_float(bool D, bool sz, size_t Vn, size_t Vd, bool N, bool Q, bool M, size_t Vm) {
     return FloatingPointInstruction(*this, D, sz, Vn, Vd, N, Q, M, Vm, [this](const auto&, const auto& reg_n, const auto& reg_m) {
         return ir.FPVectorMax(32, reg_n, reg_m, false);
     });

@@ -328,6 +328,28 @@ bool ArmTranslatorVisitor::asimd_VSHLL(bool U, bool D, size_t imm6, size_t Vd, b
     return true;
 }
 
+bool ThumbTranslatorVisitor::asimd_VSHLL(bool U, bool D, size_t imm6, size_t Vd, bool M, size_t Vm) {
+    if (Common::Bits<3, 5>(imm6) == 0) {
+        return DecodeError();
+    }
+
+    if (Common::Bit<0>(Vd)) {
+        return UndefinedInstruction();
+    }
+
+    const auto [esize, shift_amount] = ElementSizeAndShiftAmount(false, false, imm6);
+
+    const auto d = ToVector(true, Vd, D);
+    const auto m = ToVector(false, Vm, M);
+
+    const auto reg_m = ir.GetVector(m);
+    const auto ext_vec = U ? ir.VectorZeroExtend(esize, reg_m) : ir.VectorSignExtend(esize, reg_m);
+    const auto result = ir.VectorLogicalShiftLeft(esize * 2, ext_vec, static_cast<u8>(shift_amount));
+
+    ir.SetVector(d, result);
+    return true;
+}
+
 bool ArmTranslatorVisitor::asimd_VCVT_fixed(bool U, bool D, size_t imm6, size_t Vd, bool to_fixed, bool Q, bool M, size_t Vm) {
     if (Common::Bits<3, 5>(imm6) == 0) {
         return DecodeError();
