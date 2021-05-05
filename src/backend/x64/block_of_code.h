@@ -13,6 +13,7 @@
 #include <xbyak.h>
 #include <xbyak_util.h>
 
+#include "backend/x64/abi.h"
 #include "backend/x64/callback.h"
 #include "backend/x64/constant_pool.h"
 #include "backend/x64/jitstate_info.h"
@@ -31,7 +32,7 @@ struct RunCodeCallbacks {
 
 class BlockOfCode final : public Xbyak::CodeGenerator {
 public:
-    BlockOfCode(RunCodeCallbacks cb, JitStateInfo jsi, std::function<void(BlockOfCode&)> rcp);
+    BlockOfCode(RunCodeCallbacks cb, JitStateInfo jsi, size_t total_code_size, size_t far_code_offset, std::function<void(BlockOfCode&)> rcp);
     BlockOfCode(const BlockOfCode&) = delete;
 
     /// Call when external emitters have finished emitting their preludes.
@@ -129,7 +130,7 @@ public:
     static const Xbyak::Reg64 ABI_PARAM2;
     static const Xbyak::Reg64 ABI_PARAM3;
     static const Xbyak::Reg64 ABI_PARAM4;
-    static const std::array<Xbyak::Reg64, 4> ABI_PARAMS;
+    static const std::array<Xbyak::Reg64, ABI_PARAM_COUNT> ABI_PARAMS;
 #else
     static const Xbyak::Reg64 ABI_RETURN;
     static const Xbyak::Reg64 ABI_RETURN2;
@@ -139,7 +140,7 @@ public:
     static const Xbyak::Reg64 ABI_PARAM4;
     static const Xbyak::Reg64 ABI_PARAM5;
     static const Xbyak::Reg64 ABI_PARAM6;
-    static const std::array<Xbyak::Reg64, 6> ABI_PARAMS;
+    static const std::array<Xbyak::Reg64, ABI_PARAM_COUNT> ABI_PARAMS;
 #endif
 
     JitStateInfo GetJitStateInfo() const { return jsi; }
@@ -164,10 +165,11 @@ public:
 private:
     RunCodeCallbacks cb;
     JitStateInfo jsi;
+    size_t far_code_offset;
 
     bool prelude_complete = false;
-    CodePtr near_code_begin;
-    CodePtr far_code_begin;
+    CodePtr near_code_begin = nullptr;
+    CodePtr far_code_begin = nullptr;
 
     ConstantPool constant_pool;
 

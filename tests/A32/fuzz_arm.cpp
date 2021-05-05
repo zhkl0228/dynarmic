@@ -22,10 +22,10 @@
 #include "frontend/A32/location_descriptor.h"
 #include "frontend/A32/translate/translate.h"
 #include "frontend/A32/types.h"
-#include "frontend/ir/basic_block.h"
-#include "frontend/ir/location_descriptor.h"
-#include "frontend/ir/opcodes.h"
 #include "fuzz_util.h"
+#include "ir/basic_block.h"
+#include "ir/location_descriptor.h"
+#include "ir/opcodes.h"
 #include "rand_int.h"
 #include "testenv.h"
 #include "unicorn_emu/a32_unicorn.h"
@@ -158,6 +158,18 @@ std::vector<u16> GenRandomThumbInst(u32 pc, bool is_last_inst, A32::ITState it_s
 #undef INST
         };
 
+        const std::vector<std::tuple<std::string, const char*>> vfp_list {
+#define INST(fn, name, bitstring) {#fn, bitstring},
+#include "frontend/A32/decoder/vfp.inc"
+#undef INST
+        };
+
+        const std::vector<std::tuple<std::string, const char*>> asimd_list {
+#define INST(fn, name, bitstring) {#fn, bitstring},
+#include "frontend/A32/decoder/asimd.inc"
+#undef INST
+        };
+
         std::vector<InstructionGenerator> generators;
         std::vector<InstructionGenerator> invalid;
 
@@ -166,6 +178,28 @@ std::vector<u16> GenRandomThumbInst(u32 pc, bool is_last_inst, A32::ITState it_s
             "thumb16_BKPT",
             "thumb16_IT",
             "thumb16_SETEND",
+
+            // Exclusive load/stores
+            "thumb32_LDREX",
+            "thumb32_LDREXB",
+            "thumb32_LDREXD",
+            "thumb32_LDREXH",
+            "thumb32_STREX",
+            "thumb32_STREXB",
+            "thumb32_STREXD",
+            "thumb32_STREXH",
+
+            // FPSCR is inaccurate
+            "vfp_VMRS",
+
+            // Unicorn is incorrect?
+            "thumb32_MRS_reg",
+
+            // Unicorn has incorrect implementation (incorrect rounding and unsets CPSR.T??)
+            "vfp_VCVT_to_fixed",
+            "vfp_VCVT_from_fixed",
+            "asimd_VRECPS", // Unicorn does not fuse the multiply and subtraction, resulting in being off by 1ULP.
+            "asimd_VRSQRTS", // Unicorn does not fuse the multiply and subtraction, resulting in being off by 1ULP.
         };
 
         for (const auto& [fn, bitstring] : list) {
@@ -174,6 +208,34 @@ std::vector<u16> GenRandomThumbInst(u32 pc, bool is_last_inst, A32::ITState it_s
                 continue;
             }
             generators.emplace_back(InstructionGenerator{bitstring});
+        }
+        for (const auto& [fn, bs] : vfp_list) {
+            std::string bitstring = bs;
+            if (bitstring.substr(0, 4) == "cccc" || bitstring.substr(0, 4) == "----") {
+                bitstring.replace(0, 4, "1110");
+            }
+            if (std::find(do_not_test.begin(), do_not_test.end(), fn) != do_not_test.end()) {
+                invalid.emplace_back(InstructionGenerator{bitstring.c_str()});
+                continue;
+            }
+            generators.emplace_back(InstructionGenerator{bitstring.c_str()});
+        }
+        for (const auto& [fn, bs] : asimd_list) {
+            std::string bitstring = bs;
+            if (bitstring.substr(0, 7) == "1111001") {
+                const char U = bitstring[7];
+                bitstring.replace(0, 8, "111-1111");
+                bitstring[3] = U;
+            } else if (bitstring.substr(0, 8) == "11110100") {
+                bitstring.replace(0, 8, "11111001");
+            } else {
+                ASSERT_FALSE("Unhandled ASIMD instruction: {} {}", fn, bs);
+            }
+            if (std::find(do_not_test.begin(), do_not_test.end(), fn) != do_not_test.end()) {
+                invalid.emplace_back(InstructionGenerator{bitstring.c_str()});
+                continue;
+            }
+            generators.emplace_back(InstructionGenerator{bitstring.c_str()});
         }
         return InstructionGeneratorInfo{generators, invalid};
     }();

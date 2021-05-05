@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: 0BSD
  */
 
-#include "frontend/A32/translate/impl/translate_thumb.h"
+#include "frontend/A32/translate/impl/translate.h"
 
 namespace Dynarmic::A32 {
 namespace {
@@ -14,7 +14,7 @@ IR::U32 Rotate(A32::IREmitter& ir, Reg m, SignExtendRotation rotate) {
 
 using ShiftFunction = IR::ResultAndCarry<IR::U32> (IREmitter::*)(const IR::U32&, const IR::U8&, const IR::U1&);
 
-bool ShiftInstruction(ThumbTranslatorVisitor& v, Reg m, Reg d, Reg s, ShiftFunction shift_fn) {
+bool ShiftInstruction(TranslatorVisitor& v, Reg m, Reg d, Reg s, bool S, ShiftFunction shift_fn) {
     if (d == Reg::PC || m == Reg::PC || s == Reg::PC) {
         return v.UnpredictableInstruction();
     }
@@ -23,28 +23,34 @@ bool ShiftInstruction(ThumbTranslatorVisitor& v, Reg m, Reg d, Reg s, ShiftFunct
     const auto apsr_c = v.ir.GetCFlag();
     const auto result_carry = (v.ir.*shift_fn)(v.ir.GetRegister(m), shift_s, apsr_c);
 
+    if (S) {
+        v.ir.SetNFlag(v.ir.MostSignificantBit(result_carry.result));
+        v.ir.SetZFlag(v.ir.IsZero(result_carry.result));
+        v.ir.SetCFlag(result_carry.carry); 
+    }
+
     v.ir.SetRegister(d, result_carry.result);
     return true;
 }
 } // Anonymous namespace
 
-bool ThumbTranslatorVisitor::thumb32_ASR_reg(Reg m, Reg d, Reg s) {
-    return ShiftInstruction(*this, m, d, s, &IREmitter::ArithmeticShiftRight);
+bool TranslatorVisitor::thumb32_ASR_reg(bool S, Reg m, Reg d, Reg s) {
+    return ShiftInstruction(*this, m, d, s, S, &IREmitter::ArithmeticShiftRight);
 }
 
-bool ThumbTranslatorVisitor::thumb32_LSL_reg(Reg m, Reg d, Reg s) {
-    return ShiftInstruction(*this, m, d, s, &IREmitter::LogicalShiftLeft);
+bool TranslatorVisitor::thumb32_LSL_reg(bool S, Reg m, Reg d, Reg s) {
+    return ShiftInstruction(*this, m, d, s, S, &IREmitter::LogicalShiftLeft);
 }
 
-bool ThumbTranslatorVisitor::thumb32_LSR_reg(Reg m, Reg d, Reg s) {
-    return ShiftInstruction(*this, m, d, s, &IREmitter::LogicalShiftRight);
+bool TranslatorVisitor::thumb32_LSR_reg(bool S, Reg m, Reg d, Reg s) {
+    return ShiftInstruction(*this, m, d, s, S, &IREmitter::LogicalShiftRight);
 }
 
-bool ThumbTranslatorVisitor::thumb32_ROR_reg(Reg m, Reg d, Reg s) {
-    return ShiftInstruction(*this, m, d, s, &IREmitter::RotateRight);
+bool TranslatorVisitor::thumb32_ROR_reg(bool S, Reg m, Reg d, Reg s) {
+    return ShiftInstruction(*this, m, d, s, S, &IREmitter::RotateRight);
 }
 
-bool ThumbTranslatorVisitor::thumb32_SXTB(Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_SXTB(Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -56,7 +62,7 @@ bool ThumbTranslatorVisitor::thumb32_SXTB(Reg d, SignExtendRotation rotate, Reg 
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_SXTB16(Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_SXTB16(Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -70,7 +76,7 @@ bool ThumbTranslatorVisitor::thumb32_SXTB16(Reg d, SignExtendRotation rotate, Re
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_SXTAB(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_SXTAB(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -83,7 +89,7 @@ bool ThumbTranslatorVisitor::thumb32_SXTAB(Reg n, Reg d, SignExtendRotation rota
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_SXTAB16(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_SXTAB16(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -98,7 +104,7 @@ bool ThumbTranslatorVisitor::thumb32_SXTAB16(Reg n, Reg d, SignExtendRotation ro
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_SXTH(Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_SXTH(Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -110,7 +116,7 @@ bool ThumbTranslatorVisitor::thumb32_SXTH(Reg d, SignExtendRotation rotate, Reg 
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_SXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_SXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -123,7 +129,7 @@ bool ThumbTranslatorVisitor::thumb32_SXTAH(Reg n, Reg d, SignExtendRotation rota
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_UXTB(Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_UXTB(Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -135,7 +141,7 @@ bool ThumbTranslatorVisitor::thumb32_UXTB(Reg d, SignExtendRotation rotate, Reg 
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_UXTB16(Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_UXTB16(Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -147,7 +153,7 @@ bool ThumbTranslatorVisitor::thumb32_UXTB16(Reg d, SignExtendRotation rotate, Re
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_UXTAB(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_UXTAB(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -160,7 +166,7 @@ bool ThumbTranslatorVisitor::thumb32_UXTAB(Reg n, Reg d, SignExtendRotation rota
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_UXTAB16(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_UXTAB16(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -174,7 +180,7 @@ bool ThumbTranslatorVisitor::thumb32_UXTAB16(Reg n, Reg d, SignExtendRotation ro
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_UXTH(Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_UXTH(Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }
@@ -186,7 +192,7 @@ bool ThumbTranslatorVisitor::thumb32_UXTH(Reg d, SignExtendRotation rotate, Reg 
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_UXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
+bool TranslatorVisitor::thumb32_UXTAH(Reg n, Reg d, SignExtendRotation rotate, Reg m) {
     if (d == Reg::PC || m == Reg::PC) {
         return UnpredictableInstruction();
     }

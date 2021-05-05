@@ -11,7 +11,9 @@
 #include "backend/x64/a32_jitstate.h"
 #include "backend/x64/abi.h"
 #include "backend/x64/block_of_code.h"
+#include "backend/x64/hostloc.h"
 #include "backend/x64/perf_map.h"
+#include "backend/x64/stack_layout.h"
 #include "common/assert.h"
 #include "common/bit_util.h"
 
@@ -24,28 +26,26 @@
 namespace Dynarmic::Backend::X64 {
 
 #ifdef _WIN32
-const Xbyak::Reg64 BlockOfCode::ABI_RETURN = Xbyak::util::rax;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM1 = Xbyak::util::rcx;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM2 = Xbyak::util::rdx;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM3 = Xbyak::util::r8;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM4 = Xbyak::util::r9;
-const std::array<Xbyak::Reg64, 4> BlockOfCode::ABI_PARAMS = {BlockOfCode::ABI_PARAM1, BlockOfCode::ABI_PARAM2, BlockOfCode::ABI_PARAM3, BlockOfCode::ABI_PARAM4};
+const Xbyak::Reg64 BlockOfCode::ABI_RETURN = HostLocToReg64(Dynarmic::Backend::X64::ABI_RETURN);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM1 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM1);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM2 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM2);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM3 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM3);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM4 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM4);
+const std::array<Xbyak::Reg64, ABI_PARAM_COUNT> BlockOfCode::ABI_PARAMS = {BlockOfCode::ABI_PARAM1, BlockOfCode::ABI_PARAM2, BlockOfCode::ABI_PARAM3, BlockOfCode::ABI_PARAM4};
 #else
-const Xbyak::Reg64 BlockOfCode::ABI_RETURN = Xbyak::util::rax;
-const Xbyak::Reg64 BlockOfCode::ABI_RETURN2 = Xbyak::util::rdx;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM1 = Xbyak::util::rdi;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM2 = Xbyak::util::rsi;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM3 = Xbyak::util::rdx;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM4 = Xbyak::util::rcx;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM5 = Xbyak::util::r8;
-const Xbyak::Reg64 BlockOfCode::ABI_PARAM6 = Xbyak::util::r9;
-const std::array<Xbyak::Reg64, 6> BlockOfCode::ABI_PARAMS = {BlockOfCode::ABI_PARAM1, BlockOfCode::ABI_PARAM2, BlockOfCode::ABI_PARAM3, BlockOfCode::ABI_PARAM4, BlockOfCode::ABI_PARAM5, BlockOfCode::ABI_PARAM6};
+const Xbyak::Reg64 BlockOfCode::ABI_RETURN = HostLocToReg64(Dynarmic::Backend::X64::ABI_RETURN);
+const Xbyak::Reg64 BlockOfCode::ABI_RETURN2 = HostLocToReg64(Dynarmic::Backend::X64::ABI_RETURN2);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM1 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM1);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM2 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM2);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM3 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM3);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM4 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM4);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM5 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM5);
+const Xbyak::Reg64 BlockOfCode::ABI_PARAM6 = HostLocToReg64(Dynarmic::Backend::X64::ABI_PARAM6);
+const std::array<Xbyak::Reg64, ABI_PARAM_COUNT> BlockOfCode::ABI_PARAMS = {BlockOfCode::ABI_PARAM1, BlockOfCode::ABI_PARAM2, BlockOfCode::ABI_PARAM3, BlockOfCode::ABI_PARAM4, BlockOfCode::ABI_PARAM5, BlockOfCode::ABI_PARAM6};
 #endif
 
 namespace {
 
-constexpr size_t TOTAL_CODE_SIZE = 256 * 1024 * 1024;
-constexpr size_t FAR_CODE_OFFSET = 200 * 1024 * 1024;
 constexpr size_t CONSTANT_POOL_SIZE = 2 * 1024 * 1024;
 
 class CustomXbyakAllocator : public Xbyak::Allocator {
@@ -75,12 +75,14 @@ void ProtectMemory(const void* base, size_t size, bool is_executable) {
 
 } // anonymous namespace
 
-BlockOfCode::BlockOfCode(RunCodeCallbacks cb, JitStateInfo jsi, std::function<void(BlockOfCode&)> rcp)
-        : Xbyak::CodeGenerator(TOTAL_CODE_SIZE, nullptr, &s_allocator)
+BlockOfCode::BlockOfCode(RunCodeCallbacks cb, JitStateInfo jsi, size_t total_code_size, size_t far_code_offset, std::function<void(BlockOfCode&)> rcp)
+        : Xbyak::CodeGenerator(total_code_size, nullptr, &s_allocator)
         , cb(std::move(cb))
         , jsi(jsi)
+        , far_code_offset(far_code_offset)
         , constant_pool(*this, CONSTANT_POOL_SIZE)
 {
+    ASSERT(total_code_size > far_code_offset);
     EnableWriting();
     GenRunCode(rcp);
 }
@@ -88,7 +90,7 @@ BlockOfCode::BlockOfCode(RunCodeCallbacks cb, JitStateInfo jsi, std::function<vo
 void BlockOfCode::PreludeComplete() {
     prelude_complete = true;
     near_code_begin = getCurr();
-    far_code_begin = getCurr() + FAR_CODE_OFFSET;
+    far_code_begin = getCurr() + far_code_offset;
     ClearCache();
     DisableWriting();
 }
@@ -115,22 +117,13 @@ void BlockOfCode::ClearCache() {
 
 size_t BlockOfCode::SpaceRemaining() const {
     ASSERT(prelude_complete);
-    // This function provides an underestimate of near-code-size but that's okay.
-    // (Why? The maximum size of near code should be measured from near_code_begin, not top_.)
-    // These are offsets from Xbyak::CodeArray::top_.
-    std::size_t far_code_offset, near_code_offset;
-    if (in_far_code) {
-        near_code_offset = static_cast<const u8*>(near_code_ptr) - getCode();
-        far_code_offset = getCurr() - getCode();
-    } else {
-        near_code_offset = getCurr() - getCode();
-        far_code_offset = static_cast<const u8*>(far_code_ptr) - getCode();
-    }
-    if (far_code_offset > TOTAL_CODE_SIZE)
+    const u8* current_near_ptr = in_far_code ? reinterpret_cast<const u8*>(near_code_ptr) : getCode<const u8*>();
+    const u8* current_far_ptr = in_far_code ? getCode<const u8*>() : reinterpret_cast<const u8*>(far_code_ptr);
+    if (current_near_ptr >= far_code_begin)
         return 0;
-    if (near_code_offset > FAR_CODE_OFFSET)
+    if (current_far_ptr >= &top_[maxSize_])
         return 0;
-    return std::min(TOTAL_CODE_SIZE - far_code_offset, FAR_CODE_OFFSET - near_code_offset);
+    return std::min(reinterpret_cast<const u8*>(far_code_begin) - current_near_ptr, &top_[maxSize_] - current_far_ptr);
 }
 
 void BlockOfCode::RunCode(void* jit_state, CodePtr code_ptr) const {
@@ -163,14 +156,14 @@ void BlockOfCode::GenRunCode(std::function<void(BlockOfCode&)> rcp) {
     // 1. It saves all the registers we as a callee need to save.
     // 2. It aligns the stack so that the code the JIT emits can assume
     //    that the stack is appropriately aligned for CALLs.
-    ABI_PushCalleeSaveRegistersAndAdjustStack(*this);
+    ABI_PushCalleeSaveRegistersAndAdjustStack(*this, sizeof(StackLayout));
 
     mov(r15, ABI_PARAM1);
     mov(rbx, ABI_PARAM2); // save temporarily in non-volatile register
 
     cb.GetTicksRemaining->EmitCall(*this);
-    mov(qword[r15 + jsi.offsetof_cycles_to_run], ABI_RETURN);
-    mov(qword[r15 + jsi.offsetof_cycles_remaining], ABI_RETURN);
+    mov(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_to_run)], ABI_RETURN);
+    mov(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)], ABI_RETURN);
 
     rcp(*this);
 
@@ -180,12 +173,12 @@ void BlockOfCode::GenRunCode(std::function<void(BlockOfCode&)> rcp) {
     align();
     step_code = getCurr<RunCodeFuncType>();
 
-    ABI_PushCalleeSaveRegistersAndAdjustStack(*this);
+    ABI_PushCalleeSaveRegistersAndAdjustStack(*this, sizeof(StackLayout));
 
     mov(r15, ABI_PARAM1);
 
-    mov(qword[r15 + jsi.offsetof_cycles_to_run], 1);
-    mov(qword[r15 + jsi.offsetof_cycles_remaining], 1);
+    mov(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_to_run)], 1);
+    mov(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)], 1);
 
     rcp(*this);
 
@@ -201,7 +194,7 @@ void BlockOfCode::GenRunCode(std::function<void(BlockOfCode&)> rcp) {
     align();
     return_from_run_code[0] = getCurr<const void*>();
 
-    cmp(qword[r15 + jsi.offsetof_cycles_remaining], 0);
+    cmp(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)], 0);
     jng(return_to_caller);
     cb.LookupBlock->EmitCall(*this);
     jmp(ABI_RETURN);
@@ -209,7 +202,7 @@ void BlockOfCode::GenRunCode(std::function<void(BlockOfCode&)> rcp) {
     align();
     return_from_run_code[MXCSR_ALREADY_EXITED] = getCurr<const void*>();
 
-    cmp(qword[r15 + jsi.offsetof_cycles_remaining], 0);
+    cmp(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)], 0);
     jng(return_to_caller_mxcsr_already_exited);
     SwitchMxcsrOnEntry();
     cb.LookupBlock->EmitCall(*this);
@@ -226,24 +219,24 @@ void BlockOfCode::GenRunCode(std::function<void(BlockOfCode&)> rcp) {
     L(return_to_caller_mxcsr_already_exited);
 
     cb.AddTicks->EmitCall(*this, [this](RegList param) {
-        mov(param[0], qword[r15 + jsi.offsetof_cycles_to_run]);
-        sub(param[0], qword[r15 + jsi.offsetof_cycles_remaining]);
+        mov(param[0], qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_to_run)]);
+        sub(param[0], qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)]);
     });
 
-    ABI_PopCalleeSaveRegistersAndAdjustStack(*this);
+    ABI_PopCalleeSaveRegistersAndAdjustStack(*this, sizeof(StackLayout));
     ret();
 
     PerfMapRegister(run_code, getCurr(), "dynarmic_dispatcher");
 }
 
 void BlockOfCode::SwitchMxcsrOnEntry() {
-    stmxcsr(dword[r15 + jsi.offsetof_save_host_MXCSR]);
+    stmxcsr(dword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, save_host_MXCSR)]);
     ldmxcsr(dword[r15 + jsi.offsetof_guest_MXCSR]);
 }
 
 void BlockOfCode::SwitchMxcsrOnExit() {
     stmxcsr(dword[r15 + jsi.offsetof_guest_MXCSR]);
-    ldmxcsr(dword[r15 + jsi.offsetof_save_host_MXCSR]);
+    ldmxcsr(dword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, save_host_MXCSR)]);
 }
 
 void BlockOfCode::EnterStandardASIMD() {
@@ -258,13 +251,13 @@ void BlockOfCode::LeaveStandardASIMD() {
 
 void BlockOfCode::UpdateTicks() {
     cb.AddTicks->EmitCall(*this, [this](RegList param) {
-        mov(param[0], qword[r15 + jsi.offsetof_cycles_to_run]);
-        sub(param[0], qword[r15 + jsi.offsetof_cycles_remaining]);
+        mov(param[0], qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_to_run)]);
+        sub(param[0], qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)]);
     });
 
     cb.GetTicksRemaining->EmitCall(*this);
-    mov(qword[r15 + jsi.offsetof_cycles_to_run], ABI_RETURN);
-    mov(qword[r15 + jsi.offsetof_cycles_remaining], ABI_RETURN);
+    mov(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_to_run)], ABI_RETURN);
+    mov(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)], ABI_RETURN);
 }
 
 void BlockOfCode::LookupBlock() {

@@ -11,14 +11,15 @@
 #include "backend/x64/emit_x64.h"
 #include "backend/x64/nzcv_util.h"
 #include "backend/x64/perf_map.h"
+#include "backend/x64/stack_layout.h"
 #include "common/assert.h"
 #include "common/bit_util.h"
 #include "common/common_types.h"
 #include "common/scope_exit.h"
 #include "common/variant_util.h"
-#include "frontend/ir/basic_block.h"
-#include "frontend/ir/microinstruction.h"
-#include "frontend/ir/opcodes.h"
+#include "ir/basic_block.h"
+#include "ir/microinstruction.h"
+#include "ir/opcodes.h"
 
 // TODO: Have ARM flags in host flags and not have them use up GPR registers unless necessary.
 // TODO: Actually implement that proper instruction selector you've always wanted to sweetheart.
@@ -181,8 +182,8 @@ void EmitX64::EmitNZCVFromPackedFlags(EmitContext& ctx, IR::Inst* inst) {
 }
 
 void EmitX64::EmitAddCycles(size_t cycles) {
-    ASSERT(cycles < std::numeric_limits<u32>::max());
-    code.sub(qword[r15 + code.GetJitStateInfo().offsetof_cycles_remaining], static_cast<u32>(cycles));
+    ASSERT(cycles < std::numeric_limits<s32>::max());
+    code.sub(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)], static_cast<u32>(cycles));
 }
 
 Xbyak::Label EmitX64::EmitCond(IR::Cond cond) {
@@ -219,11 +220,11 @@ Xbyak::Label EmitX64::EmitCond(IR::Cond cond) {
         code.jns(pass);
         break;
     case IR::Cond::VS: //v
-        code.add(al, 0x7F);
+        code.cmp(al, 0x81);
         code.jo(pass);
         break;
     case IR::Cond::VC: //!v
-        code.add(al, 0x7F);
+        code.cmp(al, 0x81);
         code.jno(pass);
         break;
     case IR::Cond::HI: //c & !z
@@ -237,22 +238,22 @@ Xbyak::Label EmitX64::EmitCond(IR::Cond cond) {
         code.jna(pass);
         break;
     case IR::Cond::GE: // n == v
-        code.add(al, 0x7F);
+        code.cmp(al, 0x81);
         code.sahf();
         code.jge(pass);
         break;
     case IR::Cond::LT: // n != v
-        code.add(al, 0x7F);
+        code.cmp(al, 0x81);
         code.sahf();
         code.jl(pass);
         break;
     case IR::Cond::GT: // !z & (n == v)
-        code.add(al, 0x7F);
+        code.cmp(al, 0x81);
         code.sahf();
         code.jg(pass);
         break;
     case IR::Cond::LE: // z | (n != v)
-        code.add(al, 0x7F);
+        code.cmp(al, 0x81);
         code.sahf();
         code.jle(pass);
         break;
@@ -264,8 +265,11 @@ Xbyak::Label EmitX64::EmitCond(IR::Cond cond) {
     return pass;
 }
 
-EmitX64::BlockDescriptor EmitX64::RegisterBlock(const IR::LocationDescriptor& descriptor, CodePtr entrypoint, size_t size) {
+EmitX64::BlockDescriptor EmitX64::RegisterBlock(const IR::LocationDescriptor& descriptor, CodePtr entrypoint, CodePtr entrypoint_far, size_t size) {
     PerfMapRegister(entrypoint, code.getCurr(), LocationDescriptorToFriendlyName(descriptor));
+    code.SwitchToFarCode();
+    PerfMapRegister(entrypoint_far, code.getCurr(), LocationDescriptorToFriendlyName(descriptor) + "_far");
+    code.SwitchToNearCode();
     Patch(descriptor, entrypoint);
 
     BlockDescriptor block_desc{entrypoint, size};

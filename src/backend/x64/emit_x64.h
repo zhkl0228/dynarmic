@@ -20,8 +20,8 @@
 #include "backend/x64/reg_alloc.h"
 #include "common/bit_util.h"
 #include "common/fp/fpcr.h"
-#include "frontend/ir/location_descriptor.h"
-#include "frontend/ir/terminal.h"
+#include "ir/location_descriptor.h"
+#include "ir/terminal.h"
 
 namespace Dynarmic::IR {
 class Block;
@@ -85,7 +85,7 @@ protected:
 #define OPCODE(name, type, ...) void Emit##name(EmitContext& ctx, IR::Inst* inst);
 #define A32OPC(...)
 #define A64OPC(...)
-#include "frontend/ir/opcodes.inc"
+#include "ir/opcodes.inc"
 #undef OPCODE
 #undef A32OPC
 #undef A64OPC
@@ -94,7 +94,7 @@ protected:
     virtual std::string LocationDescriptorToFriendlyName(const IR::LocationDescriptor&) const = 0;
     void EmitAddCycles(size_t cycles);
     Xbyak::Label EmitCond(IR::Cond cond);
-    BlockDescriptor RegisterBlock(const IR::LocationDescriptor& location_descriptor, CodePtr entrypoint, size_t size);
+    BlockDescriptor RegisterBlock(const IR::LocationDescriptor& location_descriptor, CodePtr entrypoint, CodePtr entrypoint_far, size_t size);
     void PushRSBHelper(Xbyak::Reg64 loc_desc_reg, Xbyak::Reg64 index_reg, IR::LocationDescriptor target);
 
     // Terminal instruction emitters

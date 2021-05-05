@@ -16,7 +16,7 @@
 #include "backend/x64/block_range_information.h"
 #include "backend/x64/emit_x64.h"
 #include "frontend/A64/location_descriptor.h"
-#include "frontend/ir/terminal.h"
+#include "ir/terminal.h"
 
 namespace Dynarmic::Backend::X64 {
 
@@ -51,12 +51,8 @@ public:
 
     void InvalidateCacheRanges(const boost::icl::interval_set<u64>& ranges);
 
-    void ChangeProcessorID(size_t value) {
-        conf.processor_id = value;
-    }
-
 protected:
-    A64::UserConfig conf;
+    const A64::UserConfig conf;
     A64::Jit* jit_interface;
     BlockRangeInformation<u64> block_ranges;
 
@@ -97,7 +93,7 @@ protected:
 #define OPCODE(...)
 #define A32OPC(...)
 #define A64OPC(name, type, ...) void EmitA64##name(A64EmitContext& ctx, IR::Inst* inst);
-#include "frontend/ir/opcodes.inc"
+#include "ir/opcodes.inc"
 #undef OPCODE
 #undef A32OPC
 #undef A64OPC

@@ -17,9 +17,9 @@
 #include "backend/x64/hostloc.h"
 #include "backend/x64/oparg.h"
 #include "common/common_types.h"
-#include "frontend/ir/cond.h"
-#include "frontend/ir/microinstruction.h"
-#include "frontend/ir/value.h"
+#include "ir/cond.h"
+#include "ir/microinstruction.h"
+#include "ir/value.h"
 
 namespace Dynarmic::Backend::X64 {
 
@@ -96,7 +96,7 @@ class RegAlloc final {
 public:
     using ArgumentInfo = std::array<Argument, IR::max_arg_count>;
 
-    explicit RegAlloc(BlockOfCode& code, size_t num_spills, std::function<Xbyak::Address(HostLoc)> spill_to_addr, std::vector<HostLoc> gpr_order, std::vector<HostLoc> xmm_order);
+    explicit RegAlloc(BlockOfCode& code, std::vector<HostLoc> gpr_order, std::vector<HostLoc> xmm_order);
 
     ArgumentInfo GetArgumentInfo(IR::Inst* inst);
 
@@ -160,7 +160,6 @@ private:
     const HostLocInfo& LocInfo(HostLoc loc) const;
 
     BlockOfCode& code;
-    std::function<Xbyak::Address(HostLoc)> spill_to_addr;
     void EmitMove(size_t bit_width, HostLoc to, HostLoc from);
     void EmitExchange(HostLoc a, HostLoc b);
 };

@@ -28,8 +28,8 @@
 #include "common/fp/op.h"
 #include "common/fp/rounding_mode.h"
 #include "common/lut_from_list.h"
-#include "frontend/ir/basic_block.h"
-#include "frontend/ir/microinstruction.h"
+#include "ir/basic_block.h"
+#include "ir/microinstruction.h"
 
 namespace Dynarmic::Backend::X64 {
 
@@ -995,6 +995,142 @@ static void EmitFPRSqrtEstimate(BlockOfCode& code, EmitContext& ctx, IR::Inst* i
             ctx.reg_alloc.DefineValue(inst, result);
             return;
         }
+
+        // TODO: VRSQRT14SS implementation (AVX512F)
+
+        auto args = ctx.reg_alloc.GetArgumentInfo(inst);
+
+        const Xbyak::Xmm operand = ctx.reg_alloc.UseXmm(args[0]);
+        const Xbyak::Xmm result = ctx.reg_alloc.ScratchXmm();
+        const Xbyak::Xmm value = ctx.reg_alloc.ScratchXmm();
+        [[maybe_unused]] const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
+
+        Xbyak::Label fallback, bad_values, end, default_nan;
+        bool needs_fallback = false;
+
+        code.movaps(value, operand);
+
+        code.movaps(xmm0, code.MConst(xword, fsize == 32 ? 0xFFFF8000 : 0xFFFF'F000'0000'0000));
+        code.pand(value, xmm0);
+        code.por(value, code.MConst(xword, fsize == 32 ? 0x00008000 : 0x0000'1000'0000'0000));
+
+        // Detect NaNs, negatives, zeros, denormals and infinities
+        FCODE(ucomis)(value, code.MConst(xword, FPT(1) << FP::FPInfo<FPT>::explicit_mantissa_width));
+        code.jna(bad_values, code.T_NEAR);
+
+        FCODE(sqrts)(value, value);
+        ICODE(mov)(result, code.MConst(xword, FP::FPValue<FPT, false, 0, 1>()));
+        FCODE(divs)(result, value);
+
+        ICODE(padd)(result, code.MConst(xword, fsize == 32 ? 0x00004000 : 0x0000'0800'0000'0000));
+        code.pand(result, xmm0);
+
+        code.L(end);
+
+        code.SwitchToFarCode();
+
+        code.L(bad_values);
+        if constexpr (fsize == 32) {
+            code.movd(tmp, operand);
+
+            if (!ctx.FPCR().FZ()) {
+                if (ctx.FPCR().DN()) {
+                    // a > 0x80000000
+                    code.cmp(tmp, 0x80000000);
+                    code.ja(default_nan, code.T_NEAR);
+                }
+
+                // a > 0 && a < 0x00800000;
+                code.sub(tmp, 1);
+                code.cmp(tmp, 0x007FFFFF);
+                code.jb(fallback);
+                needs_fallback = true;
+            }
+
+            code.rsqrtss(result, operand);
+
+            if (ctx.FPCR().DN()) {
+                code.ucomiss(result, result);
+                code.jnp(end, code.T_NEAR);
+            } else {
+                // FZ ? (a >= 0x80800000 && a <= 0xFF800000) : (a >= 0x80000001 && a <= 0xFF800000)
+                // !FZ path takes into account the subtraction by one from the earlier block
+                code.add(tmp, ctx.FPCR().FZ() ? 0x7F800000 : 0x80000000);
+                code.cmp(tmp, ctx.FPCR().FZ() ? 0x7F000001 : 0x7F800000);
+                code.jnb(end, code.T_NEAR);
+            }
+
+            code.L(default_nan);
+            code.movd(result, code.MConst(xword, 0x7FC00000));
+            code.jmp(end, code.T_NEAR);
+        } else {
+            Xbyak::Label nan, zero;
+
+            code.movaps(value, operand);
+            DenormalsAreZero<fsize>(code, ctx, {value});
+            code.pxor(result, result);
+
+            code.ucomisd(value, result);
+            if (ctx.FPCR().DN()) {
+                code.jc(default_nan);
+                code.je(zero);
+            } else {
+                code.jp(nan);
+                code.je(zero);
+                code.jc(default_nan);
+            }
+
+            if (!ctx.FPCR().FZ()) {
+                needs_fallback = true;
+                code.jmp(fallback);
+            } else {
+                // result = 0
+                code.jmp(end, code.T_NEAR);
+            }
+
+            code.L(zero);
+            if (code.HasAVX()) {
+                code.vpor(result, value, code.MConst(xword, 0x7FF0'0000'0000'0000));
+            } else {
+                code.movaps(result, value);
+                code.por(result, code.MConst(xword, 0x7FF0'0000'0000'0000));
+            }
+            code.jmp(end, code.T_NEAR);
+
+            code.L(nan);
+            if (!ctx.FPCR().DN()) {
+                if (code.HasAVX()) {
+                    code.vpor(result, operand, code.MConst(xword, 0x0008'0000'0000'0000));
+                } else {
+                    code.movaps(result, operand);
+                    code.por(result, code.MConst(xword, 0x0008'0000'0000'0000));
+                }
+                code.jmp(end, code.T_NEAR);
+            }
+
+            code.L(default_nan);
+            code.movq(result, code.MConst(xword, 0x7FF8'0000'0000'0000));
+            code.jmp(end, code.T_NEAR);
+        }
+
+        code.L(fallback);
+        if (needs_fallback) {
+            code.sub(rsp, 8);
+            ABI_PushCallerSaveRegistersAndAdjustStackExcept(code, HostLocXmmIdx(result.getIdx()));
+            code.movq(code.ABI_PARAM1, operand);
+            code.mov(code.ABI_PARAM2.cvt32(), ctx.FPCR().Value());
+            code.lea(code.ABI_PARAM3, code.ptr[code.r15 + code.GetJitStateInfo().offsetof_fpsr_exc]);
+            code.CallFunction(&FP::FPRSqrtEstimate<FPT>);
+            code.movq(result, rax);
+            ABI_PopCallerSaveRegistersAndAdjustStackExcept(code, HostLocXmmIdx(result.getIdx()));
+            code.add(rsp, 8);
+            code.jmp(end, code.T_NEAR);
+        }
+
+        code.SwitchToNearCode();
+
+        ctx.reg_alloc.DefineValue(inst, result);
+        return;
     }
 
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);

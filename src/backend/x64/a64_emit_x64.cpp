@@ -19,16 +19,17 @@
 #include "backend/x64/emit_x64.h"
 #include "backend/x64/nzcv_util.h"
 #include "backend/x64/perf_map.h"
+#include "backend/x64/stack_layout.h"
 #include "common/assert.h"
 #include "common/bit_util.h"
 #include "common/common_types.h"
 #include "common/scope_exit.h"
 #include "frontend/A64/location_descriptor.h"
 #include "frontend/A64/types.h"
-#include "frontend/ir/basic_block.h"
-#include "frontend/ir/cond.h"
-#include "frontend/ir/microinstruction.h"
-#include "frontend/ir/opcodes.h"
+#include "ir/basic_block.h"
+#include "ir/cond.h"
+#include "ir/microinstruction.h"
+#include "ir/opcodes.h"
 
 // TODO: Have ARM flags in host flags and not have them use up GPR registers unless necessary.
 // TODO: Actually implement that proper instruction selector you've always wanted to sweetheart.
@@ -75,12 +76,15 @@ A64EmitX64::BlockDescriptor A64EmitX64::Emit(IR::Block& block) {
         return gprs;
     }();
 
-    RegAlloc reg_alloc{code, A64JitState::SpillCount, SpillToOpArg<A64JitState>, gpr_order, any_xmm};
+    RegAlloc reg_alloc{code, gpr_order, any_xmm};
     A64EmitContext ctx{conf, reg_alloc, block};
 
     // Start emitting.
     code.align();
     const u8* const entrypoint = code.getCurr();
+    code.SwitchToFarCode();
+    const u8* const entrypoint_far = code.getCurr();
+    code.SwitchToNearCode();
 
     ASSERT(block.GetCondition() == IR::Cond::AL);
 
@@ -99,7 +103,7 @@ A64EmitX64::BlockDescriptor A64EmitX64::Emit(IR::Block& block) {
         case IR::Opcode::A64##name:                \
             A64EmitX64::EmitA64##name(ctx, inst);  \
             break;
-#include "frontend/ir/opcodes.inc"
+#include "ir/opcodes.inc"
 #undef OPCODE
 #undef A32OPC
 #undef A64OPC
@@ -126,7 +130,7 @@ A64EmitX64::BlockDescriptor A64EmitX64::Emit(IR::Block& block) {
     const auto range = boost::icl::discrete_interval<u64>::closed(descriptor.PC(), end_location.PC() - 1);
     block_ranges.AddRange(range, descriptor);
 
-    return RegisterBlock(descriptor, entrypoint, size);
+    return RegisterBlock(descriptor, entrypoint, entrypoint_far, size);
 }
 
 void A64EmitX64::ClearCache() {
@@ -358,6 +362,7 @@ void A64EmitX64::GenTerminalHandlers() {
         code.and_(code.ABI_PARAM1.cvt32(), fast_dispatch_table_mask);
         code.lea(code.ABI_RETURN, code.ptr[code.ABI_PARAM1 + code.ABI_PARAM2]);
         code.ret();
+        PerfMapRegister(fast_dispatch_table_lookup, code.getCurr(), "a64_fast_dispatch_table_lookup");
     }
 }
 
@@ -372,7 +377,7 @@ void A64EmitX64::EmitPushRSB(EmitContext& ctx, IR::Inst* inst) {
 void A64EmitX64::EmitA64SetCheckBit(A64EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
     const Xbyak::Reg8 to_store = ctx.reg_alloc.UseGpr(args[0]).cvt8();
-    code.mov(code.byte[r15 + offsetof(A64JitState, check_bit)], to_store);
+    code.mov(code.byte[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, check_bit)], to_store);
 }
 
 void A64EmitX64::EmitA64GetCFlag(A64EmitContext& ctx, IR::Inst* inst) {
@@ -1231,7 +1236,7 @@ void A64EmitX64::EmitTerminalImpl(IR::Term::LinkBlock terminal, IR::LocationDesc
         return;
     }
 
-    code.cmp(qword[r15 + offsetof(A64JitState, cycles_remaining)], 0);
+    code.cmp(qword[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, cycles_remaining)], 0);
 
     patch_information[terminal.next].jg.emplace_back(code.getCurr());
     if (auto next_bb = GetBasicBlock(terminal.next)) {
@@ -1295,7 +1300,7 @@ void A64EmitX64::EmitTerminalImpl(IR::Term::If terminal, IR::LocationDescriptor 
 
 void A64EmitX64::EmitTerminalImpl(IR::Term::CheckBit terminal, IR::LocationDescriptor initial_location, bool is_single_step) {
     Xbyak::Label fail;
-    code.cmp(code.byte[r15 + offsetof(A64JitState, check_bit)], u8(0));
+    code.cmp(code.byte[rsp + ABI_SHADOW_SPACE + offsetof(StackLayout, check_bit)], u8(0));
     code.jz(fail);
     EmitTerminal(terminal.then_, initial_location, is_single_step);
     code.L(fail);

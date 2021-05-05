@@ -24,9 +24,9 @@
 #include "common/llvm_disassemble.h"
 #include "common/scope_exit.h"
 #include "frontend/A32/translate/translate.h"
-#include "frontend/ir/basic_block.h"
-#include "frontend/ir/location_descriptor.h"
-#include "ir_opt/passes.h"
+#include "ir/basic_block.h"
+#include "ir/location_descriptor.h"
+#include "ir/opt/passes.h"
 
 namespace Dynarmic::A32 {
 
@@ -53,7 +53,7 @@ static std::function<void(BlockOfCode&)> GenRCP(const A32::UserConfig& conf) {
 
 struct Jit::Impl {
     Impl(Jit* jit, A32::UserConfig conf)
-            : block_of_code(GenRunCodeCallbacks(conf.callbacks, &GetCurrentBlockThunk, this), JitStateInfo{jit_state}, GenRCP(conf))
+            : block_of_code(GenRunCodeCallbacks(conf.callbacks, &GetCurrentBlockThunk, this), JitStateInfo{jit_state}, conf.code_cache_size, conf.far_code_offset, GenRCP(conf))
             , emitter(block_of_code, conf, jit)
             , conf(std::move(conf))
             , jit_interface(jit)
@@ -63,7 +63,7 @@ struct Jit::Impl {
     BlockOfCode block_of_code;
     A32EmitX64 emitter;
 
-    A32::UserConfig conf;
+    const A32::UserConfig conf;
 
     // Requests made during execution to invalidate the cache are queued up here.
     size_t invalid_cache_generation = 0;
@@ -87,19 +87,6 @@ struct Jit::Impl {
 
     void Step() {
         block_of_code.StepCode(&jit_state, GetCurrentSingleStep());
-    }
-
-    void ExceptionalExit() {
-        if (!conf.wall_clock_cntpct) {
-            const s64 ticks = jit_state.cycles_to_run - jit_state.cycles_remaining;
-            conf.callbacks->AddTicks(ticks);
-        }
-        PerformCacheInvalidation();
-    }
-
-    void ChangeProcessorID(size_t value) {
-        conf.processor_id = value;
-        emitter.ChangeProcessorID(value);
     }
 
     void ClearExclusiveState() {
@@ -237,17 +224,8 @@ void Jit::HaltExecution() {
     impl->jit_state.halt_requested = true;
 }
 
-void Jit::ExceptionalExit() {
-    impl->ExceptionalExit();
-    is_executing = false;
-}
-
 void Jit::ClearExclusiveState() {
     impl->ClearExclusiveState();
-}
-
-void Jit::ChangeProcessorID(size_t new_processor) {
-    impl->ChangeProcessorID(new_processor);
 }
 
 std::array<u32, 16>& Jit::Regs() {

@@ -18,8 +18,8 @@
 #include "common/llvm_disassemble.h"
 #include "common/scope_exit.h"
 #include "frontend/A64/translate/translate.h"
-#include "frontend/ir/basic_block.h"
-#include "ir_opt/passes.h"
+#include "ir/basic_block.h"
+#include "ir/opt/passes.h"
 
 namespace Dynarmic::A64 {
 
@@ -45,7 +45,7 @@ struct Jit::Impl final {
 public:
     Impl(Jit* jit, UserConfig conf)
         : conf(conf)
-        , block_of_code(GenRunCodeCallbacks(conf.callbacks, &GetCurrentBlockThunk, this), JitStateInfo{jit_state}, GenRCP(conf))
+        , block_of_code(GenRunCodeCallbacks(conf.callbacks, &GetCurrentBlockThunk, this), JitStateInfo{jit_state}, conf.code_cache_size, conf.far_code_offset, GenRCP(conf))
         , emitter(block_of_code, conf, jit)
     {
         ASSERT(conf.page_table_address_space_bits >= 12 && conf.page_table_address_space_bits <= 64);
@@ -85,20 +85,6 @@ public:
         block_of_code.StepCode(&jit_state, GetCurrentSingleStep());
 
         PerformRequestedCacheInvalidation();
-    }
-
-    void ExceptionalExit() {
-        if (!conf.wall_clock_cntpct) {
-            const s64 ticks = jit_state.cycles_to_run - jit_state.cycles_remaining;
-            conf.callbacks->AddTicks(ticks);
-        }
-        PerformRequestedCacheInvalidation();
-        is_executing = false;
-    }
-
-    void ChangeProcessorID(size_t value) {
-        conf.processor_id = value;
-        emitter.ChangeProcessorID(value);
     }
 
     void ClearCache() {
@@ -291,7 +277,7 @@ private:
 
     bool is_executing = false;
 
-    UserConfig conf;
+    const UserConfig conf;
     A64JitState jit_state;
     BlockOfCode block_of_code;
     A64EmitX64 emitter;
@@ -327,14 +313,6 @@ void Jit::Reset() {
 
 void Jit::HaltExecution() {
     impl->HaltExecution();
-}
-
-void Jit::ExceptionalExit() {
-    impl->ExceptionalExit();
-}
-
-void Jit::ChangeProcessorID(size_t new_processor) {
-    impl->ChangeProcessorID(new_processor);
 }
 
 u64 Jit::GetSP() const {

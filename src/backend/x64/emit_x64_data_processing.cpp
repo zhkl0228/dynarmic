@@ -10,9 +10,9 @@
 #include "backend/x64/emit_x64.h"
 #include "common/assert.h"
 #include "common/common_types.h"
-#include "frontend/ir/basic_block.h"
-#include "frontend/ir/microinstruction.h"
-#include "frontend/ir/opcodes.h"
+#include "ir/basic_block.h"
+#include "ir/microinstruction.h"
+#include "ir/opcodes.h"
 
 namespace Dynarmic::Backend::X64 {
 
@@ -171,11 +171,11 @@ static void EmitConditionalSelect(BlockOfCode& code, EmitContext& ctx, IR::Inst*
         code.cmovns(else_, then_);
         break;
     case IR::Cond::VS: //v
-        code.add(nzcv.cvt8(), 0x7F);
+        code.cmp(nzcv.cvt8(), 0x81);
         code.cmovo(else_, then_);
         break;
     case IR::Cond::VC: //!v
-        code.add(nzcv.cvt8(), 0x7F);
+        code.cmp(nzcv.cvt8(), 0x81);
         code.cmovno(else_, then_);
         break;
     case IR::Cond::HI: //c & !z
@@ -189,22 +189,22 @@ static void EmitConditionalSelect(BlockOfCode& code, EmitContext& ctx, IR::Inst*
         code.cmovna(else_, then_);
         break;
     case IR::Cond::GE: // n == v
-        code.add(nzcv.cvt8(), 0x7F);
+        code.cmp(nzcv.cvt8(), 0x81);
         code.sahf();
         code.cmovge(else_, then_);
         break;
     case IR::Cond::LT: // n != v
-        code.add(nzcv.cvt8(), 0x7F);
+        code.cmp(nzcv.cvt8(), 0x81);
         code.sahf();
         code.cmovl(else_, then_);
         break;
     case IR::Cond::GT: // !z & (n == v)
-        code.add(nzcv.cvt8(), 0x7F);
+        code.cmp(nzcv.cvt8(), 0x81);
         code.sahf();
         code.cmovg(else_, then_);
         break;
     case IR::Cond::LE: // z | (n != v)
-        code.add(nzcv.cvt8(), 0x7F);
+        code.cmp(nzcv.cvt8(), 0x81);
         code.sahf();
         code.cmovle(else_, then_);
         break;
@@ -355,36 +355,19 @@ void EmitX64::EmitLogicalShiftLeft32(EmitContext& ctx, IR::Inst* inst) {
             ctx.EraseInstruction(carry_inst);
             ctx.reg_alloc.DefineValue(inst, result);
         } else {
-            ctx.reg_alloc.Use(shift_arg, HostLoc::RCX);
+            ctx.reg_alloc.UseScratch(shift_arg, HostLoc::RCX);
             const Xbyak::Reg32 result = ctx.reg_alloc.UseScratchGpr(operand_arg).cvt32();
+            const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
             const Xbyak::Reg32 carry = ctx.reg_alloc.UseScratchGpr(carry_arg).cvt32();
 
-            // TODO: Optimize this.
-
-            code.inLocalLabel();
-
-            code.cmp(code.cl, 32);
-            code.ja(".Rs_gt32");
-            code.je(".Rs_eq32");
-            // if (Rs & 0xFF < 32) {
-            code.bt(carry.cvt32(), 0); // Set the carry flag for correct behaviour in the case when Rs & 0xFF == 0
-            code.shl(result, code.cl);
+            code.mov(tmp, 63);
+            code.cmp(code.cl, 63);
+            code.cmova(code.ecx, tmp);
+            code.shl(result.cvt64(), 32);
+            code.bt(carry.cvt32(), 0);
+            code.shl(result.cvt64(), code.cl);
             code.setc(carry.cvt8());
-            code.jmp(".end");
-            // } else if (Rs & 0xFF > 32) {
-            code.L(".Rs_gt32");
-            code.xor_(result, result);
-            code.xor_(carry, carry);
-            code.jmp(".end");
-            // } else if (Rs & 0xFF == 32) {
-            code.L(".Rs_eq32");
-            code.mov(carry, result);
-            code.and_(carry, 1);
-            code.xor_(result, result);
-            // }
-            code.L(".end");
-
-            code.outLocalLabel();
+            code.shr(result.cvt64(), 32);
 
             ctx.reg_alloc.DefineValue(carry_inst, carry);
             ctx.EraseInstruction(carry_inst);
@@ -509,38 +492,18 @@ void EmitX64::EmitLogicalShiftRight32(EmitContext& ctx, IR::Inst* inst) {
             ctx.EraseInstruction(carry_inst);
             ctx.reg_alloc.DefineValue(inst, result);
         } else {
-            ctx.reg_alloc.Use(shift_arg, HostLoc::RCX);
-            const Xbyak::Reg32 result = ctx.reg_alloc.UseScratchGpr(operand_arg).cvt32();
+            ctx.reg_alloc.UseScratch(shift_arg, HostLoc::RCX);
+            const Xbyak::Reg32 operand = ctx.reg_alloc.UseGpr(operand_arg).cvt32();
+            const Xbyak::Reg32 result = ctx.reg_alloc.ScratchGpr().cvt32();
             const Xbyak::Reg32 carry = ctx.reg_alloc.UseScratchGpr(carry_arg).cvt32();
 
-            // TODO: Optimize this.
-
-            code.inLocalLabel();
-
-            code.cmp(code.cl, 32);
-            code.ja(".Rs_gt32");
-            code.je(".Rs_eq32");
-            // if (Rs & 0xFF == 0) goto end;
-            code.test(code.cl, code.cl);
-            code.jz(".end");
-            // if (Rs & 0xFF < 32) {
-            code.shr(result, code.cl);
+            code.mov(result, 63);
+            code.cmp(code.cl, 63);
+            code.cmovnb(code.ecx, result);
+            code.mov(result, operand);
+            code.bt(carry.cvt32(), 0);
+            code.shr(result.cvt64(), code.cl);
             code.setc(carry.cvt8());
-            code.jmp(".end");
-            // } else if (Rs & 0xFF > 32) {
-            code.L(".Rs_gt32");
-            code.xor_(result, result);
-            code.xor_(carry, carry);
-            code.jmp(".end");
-            // } else if (Rs & 0xFF == 32) {
-            code.L(".Rs_eq32");
-            code.bt(result, 31);
-            code.setc(carry.cvt8());
-            code.xor_(result, result);
-            // }
-            code.L(".end");
-
-            code.outLocalLabel();
 
             ctx.reg_alloc.DefineValue(carry_inst, carry);
             ctx.EraseInstruction(carry_inst);
@@ -663,32 +626,18 @@ void EmitX64::EmitArithmeticShiftRight32(EmitContext& ctx, IR::Inst* inst) {
             ctx.EraseInstruction(carry_inst);
             ctx.reg_alloc.DefineValue(inst, result);
         } else {
-            ctx.reg_alloc.Use(shift_arg, HostLoc::RCX);
-            const Xbyak::Reg32 result = ctx.reg_alloc.UseScratchGpr(operand_arg).cvt32();
-            const Xbyak::Reg8 carry = ctx.reg_alloc.UseScratchGpr(carry_arg).cvt8();
+            ctx.reg_alloc.UseScratch(shift_arg, HostLoc::RCX);
+            const Xbyak::Reg32 operand = ctx.reg_alloc.UseGpr(operand_arg).cvt32();
+            const Xbyak::Reg32 result = ctx.reg_alloc.ScratchGpr().cvt32();
+            const Xbyak::Reg32 carry = ctx.reg_alloc.UseScratchGpr(carry_arg).cvt32();
 
-            // TODO: Optimize this.
-
-            code.inLocalLabel();
-
-            code.cmp(code.cl, u32(31));
-            code.ja(".Rs_gt31");
-            // if (Rs & 0xFF == 0) goto end;
-            code.test(code.cl, code.cl);
-            code.jz(".end");
-            // if (Rs & 0xFF <= 31) {
-            code.sar(result, code.cl);
-            code.setc(carry);
-            code.jmp(".end");
-            // } else if (Rs & 0xFF > 31) {
-            code.L(".Rs_gt31");
-            code.sar(result, 31); // 31 produces the same results as anything above 31
-            code.bt(result, 31);
-            code.setc(carry);
-            // }
-            code.L(".end");
-
-            code.outLocalLabel();
+            code.mov(result, 63);
+            code.cmp(code.cl, 63);
+            code.cmovnb(code.ecx, result);
+            code.movsxd(result.cvt64(), operand);
+            code.bt(carry.cvt32(), 0);
+            code.sar(result.cvt64(), code.cl);
+            code.setc(carry.cvt8());
 
             ctx.reg_alloc.DefineValue(carry_inst, carry);
             ctx.EraseInstruction(carry_inst);
@@ -732,7 +681,7 @@ void EmitX64::EmitArithmeticShiftRight64(EmitContext& ctx, IR::Inst* inst) {
         // We note that all shift values above 63 have the same behaviour as 63 does, so we saturate `shift` to 63.
         code.mov(const63, 63);
         code.cmp(code.cl, u32(63));
-        code.cmovg(code.ecx, const63);
+        code.cmovnb(code.ecx, const63);
         code.sar(result, code.cl);
 
         ctx.reg_alloc.DefineValue(inst, result);
@@ -796,28 +745,16 @@ void EmitX64::EmitRotateRight32(EmitContext& ctx, IR::Inst* inst) {
             const Xbyak::Reg32 result = ctx.reg_alloc.UseScratchGpr(operand_arg).cvt32();
             const Xbyak::Reg8 carry = ctx.reg_alloc.UseScratchGpr(carry_arg).cvt8();
 
-            // TODO: Optimize
+            Xbyak::Label end;
 
-            code.inLocalLabel();
-
-            // if (Rs & 0xFF == 0) goto end;
             code.test(code.cl, code.cl);
-            code.jz(".end");
+            code.jz(end);
 
-            code.and_(code.ecx, u32(0x1F));
-            code.jz(".zero_1F");
-            // if (Rs & 0x1F != 0) {
             code.ror(result, code.cl);
-            code.setc(carry);
-            code.jmp(".end");
-            // } else {
-            code.L(".zero_1F");
             code.bt(result, u8(31));
             code.setc(carry);
-            // }
-            code.L(".end");
 
-            code.outLocalLabel();
+            code.L(end);
 
             ctx.reg_alloc.DefineValue(carry_inst, carry);
             ctx.EraseInstruction(carry_inst);

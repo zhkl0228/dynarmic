@@ -3,15 +3,16 @@
  * SPDX-License-Identifier: 0BSD
  */
 
+#include "frontend/A32/translate/impl/translate.h"
+
 #include "common/bit_util.h"
-#include "frontend/A32/translate/impl/translate_thumb.h"
 
 namespace Dynarmic::A32 {
 static bool ITBlockCheck(const A32::IREmitter& ir) {
     return ir.current_location.IT().IsInITBlock() && !ir.current_location.IT().IsLastInITBlock();
 }
 
-static bool TableBranch(ThumbTranslatorVisitor& v, Reg n, Reg m, bool half) {
+static bool TableBranch(TranslatorVisitor& v, Reg n, Reg m, bool half) {
     if (m == Reg::PC) {
         return v.UnpredictableInstruction();
     }
@@ -39,7 +40,7 @@ static bool TableBranch(ThumbTranslatorVisitor& v, Reg n, Reg m, bool half) {
     return false;
 }
 
-static bool LoadDualImmediate(ThumbTranslatorVisitor& v, bool P, bool U, bool W,
+static bool LoadDualImmediate(TranslatorVisitor& v, bool P, bool U, bool W,
                               Reg n, Reg t, Reg t2, Imm<8> imm8) {
     if (W && (n == t || n == t2)) {
         return v.UnpredictableInstruction();
@@ -65,7 +66,7 @@ static bool LoadDualImmediate(ThumbTranslatorVisitor& v, bool P, bool U, bool W,
     return true;
 }
 
-static bool LoadDualLiteral(ThumbTranslatorVisitor& v, bool U, bool W, Reg t, Reg t2, Imm<8> imm8) {
+static bool LoadDualLiteral(TranslatorVisitor& v, bool U, bool W, Reg t, Reg t2, Imm<8> imm8) {
     if (t == Reg::PC || t2 == Reg::PC || t == t2) {
         return v.UnpredictableInstruction();
     }
@@ -83,7 +84,7 @@ static bool LoadDualLiteral(ThumbTranslatorVisitor& v, bool U, bool W, Reg t, Re
     return true;
 }
 
-static bool StoreDual(ThumbTranslatorVisitor& v, bool P, bool U, bool W, Reg n, Reg t, Reg t2, Imm<8> imm8) {
+static bool StoreDual(TranslatorVisitor& v, bool P, bool U, bool W, Reg n, Reg t, Reg t2, Imm<8> imm8) {
     if (W && (n == t || n == t2)) {
         return v.UnpredictableInstruction();
     }
@@ -111,35 +112,146 @@ static bool StoreDual(ThumbTranslatorVisitor& v, bool P, bool U, bool W, Reg n, 
     return true;
 }
 
-bool ThumbTranslatorVisitor::thumb32_LDRD_imm_1(bool U, Reg n, Reg t, Reg t2, Imm<8> imm8) {
+bool TranslatorVisitor::thumb32_LDRD_imm_1(bool U, Reg n, Reg t, Reg t2, Imm<8> imm8) {
     return LoadDualImmediate(*this, false, U, true, n, t, t2, imm8);
 }
 
-bool ThumbTranslatorVisitor::thumb32_LDRD_imm_2(bool U, bool W, Reg n, Reg t, Reg t2, Imm<8> imm8) {
+bool TranslatorVisitor::thumb32_LDRD_imm_2(bool U, bool W, Reg n, Reg t, Reg t2, Imm<8> imm8) {
     return LoadDualImmediate(*this, true, U, W, n, t, t2, imm8);
 }
 
-bool ThumbTranslatorVisitor::thumb32_LDRD_lit_1(bool U, Reg t, Reg t2, Imm<8> imm8) {
+bool TranslatorVisitor::thumb32_LDRD_lit_1(bool U, Reg t, Reg t2, Imm<8> imm8) {
     return LoadDualLiteral(*this, U, true, t, t2, imm8);
 }
 
-bool ThumbTranslatorVisitor::thumb32_LDRD_lit_2(bool U, bool W, Reg t, Reg t2, Imm<8> imm8) {
+bool TranslatorVisitor::thumb32_LDRD_lit_2(bool U, bool W, Reg t, Reg t2, Imm<8> imm8) {
     return LoadDualLiteral(*this, U, W, t, t2, imm8);
 }
 
-bool ThumbTranslatorVisitor::thumb32_STRD_imm_1(bool U, Reg n, Reg t, Reg t2, Imm<8> imm8) {
+bool TranslatorVisitor::thumb32_STRD_imm_1(bool U, Reg n, Reg t, Reg t2, Imm<8> imm8) {
     return StoreDual(*this, false, U, true, n, t, t2, imm8);
 }
 
-bool ThumbTranslatorVisitor::thumb32_STRD_imm_2(bool U, bool W, Reg n, Reg t, Reg t2, Imm<8> imm8) {
+bool TranslatorVisitor::thumb32_STRD_imm_2(bool U, bool W, Reg n, Reg t, Reg t2, Imm<8> imm8) {
     return StoreDual(*this, true, U, W, n, t, t2, imm8);
 }
 
-bool ThumbTranslatorVisitor::thumb32_TBB(Reg n, Reg m) {
+bool TranslatorVisitor::thumb32_LDREX(Reg n, Reg t, Imm<8> imm8) {
+    if (t == Reg::PC || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.Add(ir.GetRegister(n), ir.Imm32(imm8.ZeroExtend() << 2));
+    const auto value = ir.ExclusiveReadMemory32(address);
+
+    ir.SetRegister(t, value);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_LDREXB(Reg n, Reg t) {
+    if (t == Reg::PC || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.GetRegister(n);
+    const auto value = ir.ZeroExtendToWord(ir.ExclusiveReadMemory8(address));
+
+    ir.SetRegister(t, value);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_LDREXD(Reg n, Reg t, Reg t2) {
+    if (t == Reg::PC || t2 == Reg::PC || t == t2 || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.GetRegister(n);
+    const auto [lo, hi] = ir.ExclusiveReadMemory64(address);
+
+    // DO NOT SWAP hi AND lo IN BIG ENDIAN MODE, THIS IS CORRECT BEHAVIOUR
+    ir.SetRegister(t, lo);
+    ir.SetRegister(t2, hi);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_LDREXH(Reg n, Reg t) {
+    if (t == Reg::PC || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.GetRegister(n);
+    const auto value = ir.ZeroExtendToWord(ir.ExclusiveReadMemory16(address));
+
+    ir.SetRegister(t, value);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_STREX(Reg n, Reg t, Reg d, Imm<8> imm8) {
+    if (d == Reg::PC || t == Reg::PC || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+    if (d == n || d == t) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.Add(ir.GetRegister(n), ir.Imm32(imm8.ZeroExtend() << 2));
+    const auto value = ir.GetRegister(t);
+    const auto passed = ir.ExclusiveWriteMemory32(address, value);
+    ir.SetRegister(d, passed);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_STREXB(Reg n, Reg t, Reg d) {
+    if (d == Reg::PC || t == Reg::PC || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+    if (d == n || d == t) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.GetRegister(n);
+    const auto value = ir.LeastSignificantByte(ir.GetRegister(t));
+    const auto passed = ir.ExclusiveWriteMemory8(address, value);
+    ir.SetRegister(d, passed);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_STREXD(Reg n, Reg t, Reg t2, Reg d) {
+    if (d == Reg::PC || t == Reg::PC || t2 == Reg::PC || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+    if (d == n || d == t || d == t2) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.GetRegister(n);
+    const auto value_lo = ir.GetRegister(t);
+    const auto value_hi = ir.GetRegister(t2);
+    const auto passed = ir.ExclusiveWriteMemory64(address, value_lo, value_hi);
+    ir.SetRegister(d, passed);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_STREXH(Reg n, Reg t, Reg d) {
+    if (d == Reg::PC || t == Reg::PC || n == Reg::PC) {
+        return UnpredictableInstruction();
+    }
+    if (d == n || d == t) {
+        return UnpredictableInstruction();
+    }
+
+    const auto address = ir.GetRegister(n);
+    const auto value = ir.LeastSignificantHalf(ir.GetRegister(t));
+    const auto passed = ir.ExclusiveWriteMemory16(address, value);
+    ir.SetRegister(d, passed);
+    return true;
+}
+
+bool TranslatorVisitor::thumb32_TBB(Reg n, Reg m) {
     return TableBranch(*this, n, m, false);
 }
 
-bool ThumbTranslatorVisitor::thumb32_TBH(Reg n, Reg m) {
+bool TranslatorVisitor::thumb32_TBH(Reg n, Reg m) {
     return TableBranch(*this, n, m, true);
 }
 
