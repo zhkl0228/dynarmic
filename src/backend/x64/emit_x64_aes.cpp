@@ -24,7 +24,8 @@ static void EmitAESFunction(RegAlloc::ArgumentInfo args, EmitContext& ctx, Block
     ctx.reg_alloc.EndOfAllocScope();
 
     ctx.reg_alloc.HostCall(nullptr);
-    code.sub(rsp, stack_space + ABI_SHADOW_SPACE);
+
+    ctx.reg_alloc.AllocStackSpace(stack_space + ABI_SHADOW_SPACE);
 
     code.lea(code.ABI_PARAM1, ptr[rsp + ABI_SHADOW_SPACE]);
     code.lea(code.ABI_PARAM2, ptr[rsp + ABI_SHADOW_SPACE + sizeof(AES::State)]);
@@ -32,7 +33,7 @@ static void EmitAESFunction(RegAlloc::ArgumentInfo args, EmitContext& ctx, Block
     code.CallFunction(fn);
     code.movaps(result, xword[rsp + ABI_SHADOW_SPACE]);
 
-    code.add(rsp, stack_space + ABI_SHADOW_SPACE);
+    ctx.reg_alloc.ReleaseStackSpace(stack_space + ABI_SHADOW_SPACE);
 
     ctx.reg_alloc.DefineValue(inst, result);
 }
@@ -40,7 +41,7 @@ static void EmitAESFunction(RegAlloc::ArgumentInfo args, EmitContext& ctx, Block
 void EmitX64::EmitAESDecryptSingleRound(EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (code.HasAESNI()) {
+    if (code.HasHostFeature(HostFeature::AES)) {
         const Xbyak::Xmm data = ctx.reg_alloc.UseScratchXmm(args[0]);
         const Xbyak::Xmm zero = ctx.reg_alloc.ScratchXmm();
 
@@ -57,7 +58,7 @@ void EmitX64::EmitAESDecryptSingleRound(EmitContext& ctx, IR::Inst* inst) {
 void EmitX64::EmitAESEncryptSingleRound(EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (code.HasAESNI()) {
+    if (code.HasHostFeature(HostFeature::AES)) {
         const Xbyak::Xmm data = ctx.reg_alloc.UseScratchXmm(args[0]);
         const Xbyak::Xmm zero = ctx.reg_alloc.ScratchXmm();
 
@@ -74,7 +75,7 @@ void EmitX64::EmitAESEncryptSingleRound(EmitContext& ctx, IR::Inst* inst) {
 void EmitX64::EmitAESInverseMixColumns(EmitContext& ctx, IR::Inst* inst) {
      auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (code.HasAESNI()) {
+    if (code.HasHostFeature(HostFeature::AES)) {
         const Xbyak::Xmm data = ctx.reg_alloc.UseScratchXmm(args[0]);
 
         code.aesimc(data, data);
@@ -89,7 +90,7 @@ void EmitX64::EmitAESInverseMixColumns(EmitContext& ctx, IR::Inst* inst) {
 void EmitX64::EmitAESMixColumns(EmitContext& ctx, IR::Inst* inst) {
     auto args = ctx.reg_alloc.GetArgumentInfo(inst);
 
-    if (code.HasAESNI()) {
+    if (code.HasHostFeature(HostFeature::AES)) {
         const Xbyak::Xmm data = ctx.reg_alloc.UseScratchXmm(args[0]);
         const Xbyak::Xmm zero = ctx.reg_alloc.ScratchXmm();
 

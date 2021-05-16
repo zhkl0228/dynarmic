@@ -164,7 +164,7 @@ void A64EmitX64::GenMemory128Accessors() {
 #else
     code.sub(rsp, 8);
     Devirtualize<&A64::UserCallbacks::MemoryRead128>(conf.callbacks).EmitCall(code);
-    if (code.HasSSE41()) {
+    if (code.HasHostFeature(HostFeature::SSE41)) {
         code.movq(xmm1, code.ABI_RETURN);
         code.pinsrq(xmm1, code.ABI_RETURN2, 1);
     } else {
@@ -187,7 +187,7 @@ void A64EmitX64::GenMemory128Accessors() {
     code.add(rsp, 8 + 16 + ABI_SHADOW_SPACE);
 #else
     code.sub(rsp, 8);
-    if (code.HasSSE41()) {
+    if (code.HasHostFeature(HostFeature::SSE41)) {
         code.movq(code.ABI_PARAM3, xmm1);
         code.pextrq(code.ABI_PARAM4, xmm1, 1);
     } else {
@@ -338,7 +338,7 @@ void A64EmitX64::GenTerminalHandlers() {
         calculate_location_descriptor();
         code.L(rsb_cache_miss);
         code.mov(r12, reinterpret_cast<u64>(fast_dispatch_table.data()));
-        if (code.HasSSE42()) {
+        if (code.HasHostFeature(HostFeature::SSE42)) {
             code.crc32(rbx, r12d);
         }
         code.and_(ebp, fast_dispatch_table_mask);
@@ -356,7 +356,7 @@ void A64EmitX64::GenTerminalHandlers() {
         code.align();
         fast_dispatch_table_lookup = code.getCurr<FastDispatchEntry&(*)(u64)>();
         code.mov(code.ABI_PARAM2, reinterpret_cast<u64>(fast_dispatch_table.data()));
-        if (code.HasSSE42()) {
+        if (code.HasHostFeature(HostFeature::SSE42)) {
             code.crc32(code.ABI_PARAM1, code.ABI_PARAM2);
         }
         code.and_(code.ABI_PARAM1.cvt32(), fast_dispatch_table_mask);
@@ -393,7 +393,7 @@ void A64EmitX64::EmitA64GetNZCVRaw(A64EmitContext& ctx, IR::Inst* inst) {
 
     code.mov(nzcv_raw, dword[r15 + offsetof(A64JitState, cpsr_nzcv)]);
 
-    if (code.HasFastBMI2()) {
+    if (code.HasHostFeature(HostFeature::FastBMI2)) {
         const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
         code.mov(tmp, NZCV::x64_mask);
         code.pext(nzcv_raw, nzcv_raw, tmp);
@@ -412,7 +412,7 @@ void A64EmitX64::EmitA64SetNZCVRaw(A64EmitContext& ctx, IR::Inst* inst) {
     const Xbyak::Reg32 nzcv_raw = ctx.reg_alloc.UseScratchGpr(args[0]).cvt32();
 
     code.shr(nzcv_raw, 28);
-    if (code.HasFastBMI2()) {
+    if (code.HasHostFeature(HostFeature::FastBMI2)) {
         const Xbyak::Reg32 tmp = ctx.reg_alloc.ScratchGpr().cvt32();
         code.mov(tmp, NZCV::x64_mask);
         code.pdep(nzcv_raw, nzcv_raw, tmp);
@@ -804,7 +804,7 @@ Xbyak::RegExp EmitVAddrLookup(BlockOfCode& code, A64EmitContext& ctx, size_t bit
         code.shr(tmp, int(page_bits));
     } else if (ctx.conf.silently_mirror_page_table) {
         if (valid_page_index_bits >= 32) {
-            if (code.HasBMI2()) {
+            if (code.HasHostFeature(HostFeature::BMI2)) {
                 const Xbyak::Reg64 bit_count = ctx.reg_alloc.ScratchGpr();
                 code.mov(bit_count, unused_top_bits);
                 code.bzhi(tmp, vaddr, bit_count);
@@ -1101,7 +1101,7 @@ void A64EmitX64::EmitExclusiveReadMemory(A64EmitContext& ctx, IR::Inst* inst) {
 
         code.mov(code.byte[r15 + offsetof(A64JitState, exclusive_state)], u8(1));
         code.mov(code.ABI_PARAM1, reinterpret_cast<u64>(&conf));
-        code.sub(rsp, 16 + ABI_SHADOW_SPACE);
+        ctx.reg_alloc.AllocStackSpace(16 + ABI_SHADOW_SPACE);
         code.lea(code.ABI_PARAM3, ptr[rsp + ABI_SHADOW_SPACE]);
         code.CallLambda(
             [](A64::UserConfig& conf, u64 vaddr, A64::Vector& ret) {
@@ -1111,7 +1111,7 @@ void A64EmitX64::EmitExclusiveReadMemory(A64EmitContext& ctx, IR::Inst* inst) {
             }
         );
         code.movups(result, xword[rsp + ABI_SHADOW_SPACE]);
-        code.add(rsp, 16 + ABI_SHADOW_SPACE);
+        ctx.reg_alloc.ReleaseStackSpace(16 + ABI_SHADOW_SPACE);
 
         ctx.reg_alloc.DefineValue(inst, result);
     }
@@ -1170,7 +1170,7 @@ void A64EmitX64::EmitExclusiveWriteMemory(A64EmitContext& ctx, IR::Inst* inst) {
             }
         );
     } else {
-        code.sub(rsp, 16 + ABI_SHADOW_SPACE);
+        ctx.reg_alloc.AllocStackSpace(16 + ABI_SHADOW_SPACE);
         code.lea(code.ABI_PARAM3, ptr[rsp + ABI_SHADOW_SPACE]);
         code.movaps(xword[code.ABI_PARAM3], xmm1);
         code.CallLambda(
@@ -1181,7 +1181,7 @@ void A64EmitX64::EmitExclusiveWriteMemory(A64EmitContext& ctx, IR::Inst* inst) {
                     }) ? 0 : 1;
             }
         );
-        code.add(rsp, 16 + ABI_SHADOW_SPACE);
+        ctx.reg_alloc.ReleaseStackSpace(16 + ABI_SHADOW_SPACE);
     }
     code.L(end);
 }

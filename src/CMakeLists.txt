@@ -157,6 +157,7 @@ if ("A32" IN_LIST DYNARMIC_FRONTENDS)
         frontend/A32/translate/impl/thumb16.cpp
         frontend/A32/translate/impl/thumb32_branch.cpp
         frontend/A32/translate/impl/thumb32_control.cpp
+        frontend/A32/translate/impl/thumb32_coprocessor.cpp
         frontend/A32/translate/impl/thumb32_data_processing_modified_immediate.cpp
         frontend/A32/translate/impl/thumb32_data_processing_plain_binary_immediate.cpp
         frontend/A32/translate/impl/thumb32_data_processing_register.cpp
@@ -287,6 +288,7 @@ if (ARCHITECTURE STREQUAL "x86_64")
         backend/x64/exclusive_monitor.cpp
         backend/x64/hostloc.cpp
         backend/x64/hostloc.h
+        backend/x64/host_feature.h
         backend/x64/jitstate_info.h
         backend/x64/oparg.h
         backend/x64/perf_map.cpp
